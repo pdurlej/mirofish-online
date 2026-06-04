@@ -30,3 +30,105 @@ def test_chat_json_error_does_not_include_raw_model_output():
     assert "chars=" in message
     assert "do not leak" not in message
     assert '{"private"' not in message
+
+
+def test_chat_schema_accepts_valid_json(monkeypatch):
+    monkeypatch.setattr("app.utils.llm_client.Config.MIROFISH_JSON_MODEL", "schema-model")
+    client = object.__new__(LLMClient)
+    seen = {}
+
+    def fake_chat(**kwargs):
+        seen.update(kwargs)
+        return '{"ok": true, "items": ["one", "two"]}'
+
+    client.chat = fake_chat
+    client.model = "default-model"
+
+    schema = {
+        "type": "object",
+        "required": ["ok", "items"],
+        "properties": {
+            "ok": {"type": "boolean"},
+            "items": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        },
+    }
+
+    assert client.chat_schema("json", schema, messages=[]) == {
+        "ok": True,
+        "items": ["one", "two"],
+    }
+    assert seen["model"] == "schema-model"
+    assert seen["response_format"]["type"] == "json_schema"
+
+
+def test_chat_schema_falls_back_when_provider_rejects_json_schema():
+    client = object.__new__(LLMClient)
+    client.model = "fallback-model"
+    calls = []
+
+    def fake_chat(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("response_format", {}).get("type") == "json_schema":
+            raise RuntimeError("unsupported response_format json_schema")
+        return '{"ok": true}'
+
+    client.chat = fake_chat
+    schema = {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"type": "boolean"}},
+    }
+
+    assert client.chat_schema("json", schema, messages=[]) == {"ok": True}
+    assert len(calls) == 2
+    assert calls[1]["response_format"] == {"type": "json_object"}
+
+
+def test_chat_schema_falls_back_when_provider_ignores_schema():
+    client = object.__new__(LLMClient)
+    client.model = "fallback-model"
+    calls = []
+
+    def fake_chat(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return "{}"
+        return '{"ok": true}'
+
+    client.chat = fake_chat
+    schema = {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"type": "boolean"}},
+    }
+
+    assert client.chat_schema("json", schema, messages=[]) == {"ok": True}
+    assert len(calls) == 2
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert calls[1]["response_format"] == {"type": "json_object"}
+
+
+def test_chat_schema_error_does_not_include_raw_model_output():
+    client = object.__new__(LLMClient)
+    client.model = "safe-model"
+
+    def fake_chat(**_kwargs):
+        return '{"private": "do not leak", "items": []}'
+
+    client.chat = fake_chat
+    schema = {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+            "items": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        },
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        client.chat_schema("json", schema, messages=[])
+
+    message = str(exc_info.value)
+    assert "Schema validation failed" in message
+    assert "$.items" in message
+    assert "do not leak" not in message
+    assert "private" not in message

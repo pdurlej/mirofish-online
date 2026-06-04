@@ -31,6 +31,10 @@ class Config:
     LLM_API_KEY = os.environ.get('LLM_API_KEY')
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
     LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'qwen2.5:32b')
+    MIROFISH_JSON_MODEL = os.environ.get('MIROFISH_JSON_MODEL')
+    MIROFISH_NER_MODEL = os.environ.get('MIROFISH_NER_MODEL')
+    MIROFISH_REPORT_MODEL = os.environ.get('MIROFISH_REPORT_MODEL')
+    MIROFISH_REPAIR_MODEL = os.environ.get('MIROFISH_REPAIR_MODEL')
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
