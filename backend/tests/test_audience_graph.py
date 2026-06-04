@@ -57,6 +57,12 @@ def test_model_router_normalizes_legacy_cloud_suffix(monkeypatch):
     assert assignment.model in {"glm-5.1", "kimi-k2.6"}
 
 
+def test_model_router_default_live_pool_is_deepseek_only():
+    router = ModelRouter()
+
+    assert router.model_pool == ("deepseek-v4-pro", "deepseek-v4-flash")
+
+
 def test_fake_audience_run_has_20_reactions_and_next_action():
     result = build_fake_audience_run(
         AudienceRunInput(
