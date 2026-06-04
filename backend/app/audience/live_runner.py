@@ -57,6 +57,12 @@ class PersonaCallResult:
     schema_fallback_used: bool
 
 
+GENERIC_OBJECTION_FALLBACKS = {
+    "this needs a clearer practical consequence.",
+    "this needs a clearer practical consequence for the audience.",
+}
+
+
 class AudienceLiveRunner:
     def __init__(
         self,
@@ -150,13 +156,16 @@ class AudienceLiveRunner:
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
+                    error_kind = _sanitized_error_kind(exc)
                     failures.append(
                         {
                             "persona_id": persona.id,
                             "model": assignment.model,
-                            "error_kind": _sanitized_error_kind(exc),
+                            "error_kind": error_kind,
                         }
                     )
+                    if error_kind == "low_quality_response":
+                        receipt["low_quality_persona_count"] += 1
                     _record_failure(receipt, assignment.model)
         except FuturesTimeoutError:
             timed_out = True
@@ -224,6 +233,7 @@ class AudienceLiveRunner:
                 reasoning_effort=_reasoning_effort_for_model(model),
             )
             parsed = _parse_and_validate(result.content)
+            _validate_reaction_quality(parsed)
             return PersonaCallResult(parsed, result, False)
         except Exception as exc:
             if not _looks_like_schema_retry(exc):
@@ -247,19 +257,22 @@ class AudienceLiveRunner:
             model=model,
             reasoning_effort=_reasoning_effort_for_model(model),
         )
-        return PersonaCallResult(_parse_and_validate(result.content), result, True)
+        parsed = _parse_and_validate(result.content)
+        _validate_reaction_quality(parsed)
+        return PersonaCallResult(parsed, result, True)
 
 
 def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
-                "content": (
-                    "You are one synthetic audience persona in Piotr Durlej's private "
-                    "content/product thinking panel. Answer as this persona only. "
-                    "Be concrete, skeptical when appropriate, and return only JSON. "
-                    "Keep every JSON string to one short sentence."
-                ),
+            "content": (
+                "You are one synthetic audience persona in Piotr Durlej's private "
+                "content/product thinking panel. Answer as this persona only. "
+                "Be concrete, skeptical when appropriate, and return only JSON. "
+                "Keep every JSON string to one short sentence. Objections and insights "
+                "must mention a concrete part of the submitted topic, not generic advice."
+            ),
         },
         {
             "role": "user",
@@ -349,6 +362,12 @@ def _normalize_loose_response(value: Any) -> dict[str, Any]:
     }
 
 
+def _validate_reaction_quality(parsed: dict[str, Any]) -> None:
+    objection = str(parsed.get("objection") or "").strip().lower()
+    if objection in GENERIC_OBJECTION_FALLBACKS:
+        raise ValueError("low_quality_response")
+
+
 def _normalize_stance(value: str) -> str:
     text = value.lower()
     if any(token in text for token in ("negative", "skeptic", "concern", "bad")):
@@ -386,6 +405,7 @@ def _empty_live_receipt() -> dict[str, Any]:
         "schema_fallback_count": 0,
         "run_timed_out": False,
         "failed_persona_count": 0,
+        "low_quality_persona_count": 0,
         "failure_rate": 0.0,
         "reliability_grade": "unknown",
     }
@@ -530,4 +550,6 @@ def _sanitized_error_kind(exc: Exception) -> str:
         return "schema_validation_failed"
     if isinstance(exc, ValueError) and str(exc) == "invalid_json":
         return "invalid_json"
+    if isinstance(exc, ValueError) and str(exc) == "low_quality_response":
+        return "low_quality_response"
     return type(exc).__name__
