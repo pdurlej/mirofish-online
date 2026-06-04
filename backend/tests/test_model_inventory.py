@@ -16,6 +16,7 @@ class FakeResponse:
         return json.dumps(
             {
                 "data": [
+                    {"id": "deepseek-v4-flash"},
                     {"id": "deepseek-v4-pro"},
                     {"id": "glm-5.1"},
                     {"id": "qwen3.5:397b"},
@@ -40,12 +41,13 @@ def test_model_inventory_triages_cloud_models_without_secret_output():
     )
 
     assert inventory.models == [
+        "deepseek-v4-flash",
         "deepseek-v4-pro",
         "glm-5.1",
         "mistral-large-3:675b",
         "qwen3.5:397b",
     ]
-    assert inventory.triage()["primary"] == ["deepseek-v4-pro", "glm-5.1"]
-    assert inventory.triage()["quality_retry"] == ["qwen3.5:397b"]
-    assert inventory.triage()["candidate_review"] == ["mistral-large-3:675b"]
+    assert inventory.triage()["primary"] == ["deepseek-v4-flash"]
+    assert inventory.triage()["quality_retry"] == ["deepseek-v4-pro"]
+    assert inventory.triage()["candidate_review"] == ["glm-5.1", "mistral-large-3:675b", "qwen3.5:397b"]
     assert seen["auth"] == "Bearer SECRET_TOKEN"

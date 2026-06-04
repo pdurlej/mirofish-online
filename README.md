@@ -18,9 +18,10 @@ into a podcast, turn into a post, or save for later.
 - **20 canonical synthetic personas** with stable identities and segments.
 - **Neo4j graph memory** for topics, reactions, objections, recommendations,
   and similarity between previous ideas.
-- **Cloud model ensemble** through an OpenAI-compatible endpoint, with local
-  graph storage. The live default currently favors the models that pass
-  structured-output smoke reliably; broader GLM/Kimi/Minimax routing remains a
+- **DeepSeek V4 Flash-first cloud inference** through an OpenAI-compatible
+  endpoint, with local graph storage. The live default optimizes for
+  `deepseek-v4-flash`; `deepseek-v4-pro` is reserved for deliberate
+  high-quality retry/escalation. Broader GLM/Kimi/Minimax routing remains a
   measured candidate path, not a promise.
 - **Tailnet-first deployment** on RS2000 at `mirofish.pdurlej.com`.
 

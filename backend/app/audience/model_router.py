@@ -10,10 +10,9 @@ from .personas import AudiencePersona
 
 
 DEFAULT_MODEL_POOL = (
-    "deepseek-v4-pro",
     "deepseek-v4-flash",
 )
-HIGH_QUALITY_RETRY_MODEL = "qwen3.5:397b"
+HIGH_QUALITY_RETRY_MODEL = "deepseek-v4-pro"
 
 
 @dataclass(frozen=True)
