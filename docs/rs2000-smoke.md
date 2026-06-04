@@ -64,6 +64,30 @@ The smoke compose binds host ports to `127.0.0.1` only:
 - Neo4j Bolt: `127.0.0.1:17687`
 - embedding Ollama: `127.0.0.1:11435`
 
+## Tailnet-only UI route
+
+The frontend now defaults API calls to same-origin `/api`. In the RS2000 smoke
+container, Vite proxies `/api` from UI port `3000` to backend port `5001`
+inside the same container. That lets the platform route only the UI service
+through Traefik while keeping the raw backend, Neo4j Browser, Bolt, and
+embedding Ollama private.
+
+Enable the route only when the platform proxy network and Tailnet allowlist
+middleware exist:
+
+```bash
+MIROFISH_TRAEFIK_ENABLE=true \
+MIROFISH_HOSTNAME=mirofish.pdurlej.com \
+docker compose -f deploy/rs2000/docker-compose.cloud-smoke.yml config --quiet
+```
+
+Expected exposure shape:
+
+- `mirofish.pdurlej.com` routes to service port `3000` only.
+- `/api` remains same-origin through the UI service proxy.
+- No Traefik service exposes backend port `5001`.
+- Neo4j Browser, Bolt, and embedding Ollama keep host-local bindings.
+
 ## Health checks
 
 ```bash
