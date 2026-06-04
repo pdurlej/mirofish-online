@@ -2,8 +2,11 @@
   <div class="home-container">
     <!-- Top Navigation Bar -->
     <nav class="navbar" :style="s.navbar">
-      <div class="nav-brand" :style="s.navBrand">MIROFISH OFFLINE</div>
+      <div class="nav-brand" :style="s.navBrand">MIROFISH ONLINE</div>
       <div class="nav-links" :style="s.navLinks">
+        <button type="button" :style="s.audienceLink" @click="router.push('/audience')">
+          Audience Graph <span>→</span>
+        </button>
         <a href="https://github.com/nikmcfly/MiroFish-Offline" target="_blank" class="github-link" :style="s.githubLink">
           Visit our Github <span>↗</span>
         </a>
@@ -15,21 +18,21 @@
       <section class="hero-section" :style="s.heroSection">
         <div class="hero-left" :style="s.heroLeft">
           <div class="tag-row" :style="s.tagRow">
-            <span class="orange-tag" :style="s.orangeTag">Offline Multi-Agent Simulation Engine</span>
+            <span class="orange-tag" :style="s.orangeTag">Private Audience Graph</span>
             <span class="version-text" :style="s.versionText">/ v0.1-preview</span>
           </div>
 
           <h1 class="main-title" :style="s.mainTitle">
-            Upload Any Document<br>
-            <span class="gradient-text" :style="s.gradientText">Predict What Happens Next</span>
+            Test Content Ideas<br>
+            <span class="gradient-text" :style="s.gradientText">Before You Spend Attention</span>
           </h1>
 
           <div class="hero-desc" :style="s.heroDesc">
             <p :style="s.heroDescP">
-              From a single document, <span :style="s.highlightBold">MiroFish Offline</span> extracts reality seeds and builds a parallel world of <span :style="s.highlightOrange">autonomous AI agents</span> — running entirely on your machine. Inject variables, observe emergent behavior, and find <span :style="s.highlightCode">"local optima"</span> in complex social dynamics.
+              <span :style="s.highlightBold">MiroFish Online</span> is a private audience-simulation fork for solo operators. It uses a local graph where that matters and cloud models where they provide leverage, so you can test podcast, writing, and product ideas without needing workstation-grade GPU hardware.
             </p>
             <p class="slogan-text" :style="s.sloganText">
-              Your data never leaves your machine. The future is simulated locally<span :style="s.blinkingCursor">_</span>
+              Tailnet-first, operator-owned, optimized for practical judgment over infrastructure theater<span :style="s.blinkingCursor">_</span>
             </p>
           </div>
 
@@ -54,17 +57,17 @@
 
           <h2 class="section-title" :style="s.sectionTitle">Ready</h2>
           <p class="section-desc" :style="s.sectionDesc">
-            Local prediction engine on standby. Upload unstructured data to initialize a simulation.
+            Private audience workflow on standby. Use the classic document simulation flow or start with the new Audience Graph path.
           </p>
 
           <div class="metrics-row" :style="s.metricsRow">
             <div class="metric-card" :style="s.metricCard">
-              <div class="metric-value" :style="s.metricValue">Free</div>
-              <div class="metric-label" :style="s.metricLabel">Runs on your hardware</div>
+              <div class="metric-value" :style="s.metricValue">Hybrid</div>
+              <div class="metric-label" :style="s.metricLabel">Cloud LLMs + local graph</div>
             </div>
             <div class="metric-card" :style="s.metricCard">
-              <div class="metric-value" :style="s.metricValue">Private</div>
-              <div class="metric-label" :style="s.metricLabel">100% offline, no cloud</div>
+              <div class="metric-value" :style="s.metricValue">Tailnet</div>
+              <div class="metric-label" :style="s.metricLabel">Private route, not public SaaS</div>
             </div>
           </div>
 
@@ -123,7 +126,7 @@
               </div>
               <div :style="s.inputWrapper">
                 <textarea v-model="formData.simulationRequirement" :style="s.codeInput" placeholder="// Describe your simulation or prediction goal in natural language" rows="6" :disabled="loading"></textarea>
-                <div :style="s.modelBadge">Engine: Ollama + Neo4j (local)</div>
+              <div :style="s.modelBadge">Engine: cloud LLMs + Neo4j memory</div>
               </div>
             </div>
 
@@ -154,7 +157,8 @@ const sans = 'Space Grotesk, Noto Sans SC, system-ui, sans-serif'
 const s = reactive({
   navbar: { height: '60px', background: '#000', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px' },
   navBrand: { fontFamily: mono, fontWeight: '800', letterSpacing: '1px', fontSize: '1.2rem' },
-  navLinks: { display: 'flex', alignItems: 'center' },
+  navLinks: { display: 'flex', alignItems: 'center', gap: '14px' },
+  audienceLink: { color: '#fff', background: 'transparent', border: '1px solid #444', padding: '8px 12px', fontFamily: mono, fontSize: '0.85rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
   githubLink: { color: '#fff', textDecoration: 'none', fontFamily: mono, fontSize: '0.9rem', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' },
   mainContent: { maxWidth: '1400px', margin: '0 auto', padding: '60px 40px' },
   heroSection: { display: 'flex', justifyContent: 'space-between', marginBottom: '80px', position: 'relative' },

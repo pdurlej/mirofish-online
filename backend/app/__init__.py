@@ -66,7 +66,17 @@ def create_app(config_class=Config):
         logger = get_logger('mirofish.request')
         logger.debug(f"Request: {request.method} {request.path}")
         if request.content_type and 'json' in request.content_type:
-            logger.debug(f"Request body: {request.get_json(silent=True)}")
+            if request.path.startswith('/api/audience/'):
+                body = request.get_json(silent=True) or {}
+                logger.debug(
+                    "Request body: %s",
+                    {
+                        "redacted": True,
+                        "keys": sorted(body.keys()) if isinstance(body, dict) else [],
+                    },
+                )
+            else:
+                logger.debug(f"Request body: {request.get_json(silent=True)}")
 
     @app.after_request
     def log_response(response):
@@ -75,10 +85,11 @@ def create_app(config_class=Config):
         return response
 
     # Register blueprints
-    from .api import graph_bp, simulation_bp, report_bp
+    from .api import graph_bp, simulation_bp, report_bp, audience_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
+    app.register_blueprint(audience_bp, url_prefix='/api/audience')
 
     # Health check
     @app.route('/health')
@@ -89,4 +100,3 @@ def create_app(config_class=Config):
         logger.info("MiroFish-Offline Backend startup complete")
 
     return app
-
