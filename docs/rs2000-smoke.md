@@ -51,10 +51,15 @@ Required secret-backed values:
 ## Start smoke stack
 
 ```bash
-docker compose -f deploy/rs2000/docker-compose.cloud-smoke.yml up -d neo4j embedding-ollama
+docker compose --env-file .env -f deploy/rs2000/docker-compose.cloud-smoke.yml up -d neo4j embedding-ollama
 docker exec mirofish-online-embedding-ollama ollama pull nomic-embed-text
-docker compose -f deploy/rs2000/docker-compose.cloud-smoke.yml up -d --build mirofish
+docker compose --env-file .env -f deploy/rs2000/docker-compose.cloud-smoke.yml up -d --build mirofish
 ```
+
+Use `--env-file .env` for runtime commands. The compose file's `env_file:`
+passes values into containers, but Compose variable interpolation such as
+`${NEO4J_PASSWORD:?set NEO4J_PASSWORD}` is resolved before container env files
+are applied.
 
 The smoke compose binds host ports to `127.0.0.1` only:
 
@@ -78,7 +83,7 @@ middleware exist:
 ```bash
 MIROFISH_TRAEFIK_ENABLE=true \
 MIROFISH_HOSTNAME=mirofish.pdurlej.com \
-docker compose -f deploy/rs2000/docker-compose.cloud-smoke.yml config --quiet
+docker compose --env-file .env -f deploy/rs2000/docker-compose.cloud-smoke.yml config --quiet
 ```
 
 Expected exposure shape:
