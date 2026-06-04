@@ -61,6 +61,32 @@ def test_chat_schema_accepts_valid_json(monkeypatch):
     assert seen["response_format"]["type"] == "json_schema"
 
 
+def test_chat_schema_passes_reasoning_effort(monkeypatch):
+    monkeypatch.setattr("app.utils.llm_client.Config.MIROFISH_JSON_MODEL", "schema-model")
+    client = object.__new__(LLMClient)
+    seen = {}
+
+    def fake_chat(**kwargs):
+        seen.update(kwargs)
+        return '{"ok": true}'
+
+    client.chat = fake_chat
+    client.model = "default-model"
+    schema = {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"type": "boolean"}},
+    }
+
+    assert client.chat_schema(
+        "json",
+        schema,
+        messages=[],
+        reasoning_effort="medium",
+    ) == {"ok": True}
+    assert seen["reasoning_effort"] == "medium"
+
+
 def test_chat_schema_falls_back_when_provider_rejects_json_schema():
     client = object.__new__(LLMClient)
     client.model = "fallback-model"
