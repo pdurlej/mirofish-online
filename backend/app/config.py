@@ -38,6 +38,12 @@ class Config:
     MIROFISH_AUDIENCE_FAILURE_THRESHOLD = float(
         os.environ.get('MIROFISH_AUDIENCE_FAILURE_THRESHOLD', '0.30')
     )
+    MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS = float(
+        os.environ.get('MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS', '75')
+    )
+    MIROFISH_AUDIENCE_MAX_WORKERS = int(
+        os.environ.get('MIROFISH_AUDIENCE_MAX_WORKERS', '5')
+    )
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')

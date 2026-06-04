@@ -6,6 +6,7 @@ import json
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -63,10 +64,15 @@ class AudienceLiveRunner:
         client_factory: Callable[[], LLMClient] | None = None,
         model_router: ModelRouter | None = None,
         failure_threshold: float = 0.30,
+        call_timeout_seconds: float = 75,
+        max_workers: int = 5,
     ) -> None:
-        self._client_factory = client_factory or LLMClient
+        self._client_factory = client_factory or (
+            lambda: LLMClient(timeout=call_timeout_seconds)
+        )
         self._model_router = model_router or ModelRouter()
         self._failure_threshold = failure_threshold
+        self._max_workers = max(1, max_workers)
 
     def run(
         self,
@@ -94,50 +100,63 @@ class AudienceLiveRunner:
         failures: list[dict[str, Any]] = []
         receipt = _empty_live_receipt()
 
-        for persona in active_personas:
-            assignment = self._model_router.assign(persona, run_input.run_seed, run_id)
-            personas_payload.append(persona.to_dict() | {"model_assignment": assignment.to_dict()})
-            try:
-                call = self._call_persona(run_input, persona, assignment.model)
-                parsed = call.parsed
-                receipt["schema_fallback_count"] += int(call.schema_fallback_used)
-                _record_usage(receipt, call.metadata)
-                reactions.append(
-                    {
-                        "id": f"reaction-{run_id[:8]}-{persona.id}",
-                        "persona_id": persona.id,
-                        "stance": parsed["stance"],
-                        "channel_fit": parsed["channel_fit"],
-                        "model": call.metadata.model,
-                        "summary": parsed["summary"],
-                    }
+        future_map = {}
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            for persona in active_personas:
+                assignment = self._model_router.assign(persona, run_input.run_seed, run_id)
+                personas_payload.append(persona.to_dict() | {"model_assignment": assignment.to_dict()})
+                future = executor.submit(
+                    self._call_persona,
+                    run_input,
+                    persona,
+                    assignment.model,
                 )
-                objections.append(
-                    {
-                        "id": f"objection-{run_id[:8]}-{persona.id}",
-                        "persona_id": persona.id,
-                        "text": parsed["objection"],
-                        "severity": parsed["objection_severity"],
-                    }
-                )
-                insights.append(
-                    {
-                        "id": f"insight-{run_id[:8]}-{persona.id}",
-                        "text": parsed["insight"],
-                        "persona_ids": [persona.id],
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001
-                failures.append(
-                    {
-                        "persona_id": persona.id,
-                        "model": assignment.model,
-                        "error_kind": _sanitized_error_kind(exc),
-                    }
-                )
-                _record_failure(receipt, assignment.model)
-                if len(failures) / len(active_personas) > self._failure_threshold:
-                    raise AudienceRunFailed("failure_threshold_exceeded") from exc
+                future_map[future] = (persona, assignment)
+
+            for future in as_completed(future_map):
+                persona, assignment = future_map[future]
+                try:
+                    call = future.result()
+                    parsed = call.parsed
+                    receipt["schema_fallback_count"] += int(call.schema_fallback_used)
+                    _record_usage(receipt, call.metadata)
+                    reactions.append(
+                        {
+                            "id": f"reaction-{run_id[:8]}-{persona.id}",
+                            "persona_id": persona.id,
+                            "stance": parsed["stance"],
+                            "channel_fit": parsed["channel_fit"],
+                            "model": call.metadata.model,
+                            "summary": parsed["summary"],
+                        }
+                    )
+                    objections.append(
+                        {
+                            "id": f"objection-{run_id[:8]}-{persona.id}",
+                            "persona_id": persona.id,
+                            "text": parsed["objection"],
+                            "severity": parsed["objection_severity"],
+                        }
+                    )
+                    insights.append(
+                        {
+                            "id": f"insight-{run_id[:8]}-{persona.id}",
+                            "text": parsed["insight"],
+                            "persona_ids": [persona.id],
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(
+                        {
+                            "persona_id": persona.id,
+                            "model": assignment.model,
+                            "error_kind": _sanitized_error_kind(exc),
+                        }
+                    )
+                    _record_failure(receipt, assignment.model)
+
+        if len(failures) / len(active_personas) > self._failure_threshold:
+            raise AudienceRunFailed("failure_threshold_exceeded")
 
         receipt["latency_ms"] = int((time.monotonic() - started) * 1000)
         receipt["failed_persona_count"] = len(failures)
@@ -178,7 +197,7 @@ class AudienceLiveRunner:
             result = client.chat_with_metadata(
                 messages=messages,
                 temperature=0.45,
-                max_tokens=900,
+                max_tokens=650,
                 response_format=response_format,
                 model=model,
                 reasoning_effort="medium",
@@ -202,7 +221,7 @@ class AudienceLiveRunner:
                 *messages,
             ],
             temperature=0.35,
-            max_tokens=900,
+            max_tokens=650,
             response_format={"type": "json_object"},
             model=model,
             reasoning_effort="medium",
