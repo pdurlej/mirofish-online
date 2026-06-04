@@ -1,0 +1,222 @@
+[
+  {
+    "id": "pwp-pragmatic-pm",
+    "name": "Pragmatic Product Manager",
+    "active": true,
+    "segments": ["produkt-w-praktyce", "linkedin", "product-managers"],
+    "goals": ["ship useful product", "avoid process theater"],
+    "objections": ["This sounds abstract unless it changes delivery decisions."],
+    "channel_preferences": ["podcast", "linkedin"],
+    "skepticism": 0.72,
+    "model_hint": "deepseek-v4-pro"
+  },
+  {
+    "id": "ai-platform-pm",
+    "name": "AI Platform PM",
+    "active": true,
+    "segments": ["ai-platform-devtools", "product-managers", "enterprise-governance"],
+    "goals": ["make AI features reliable", "measure model quality"],
+    "objections": ["Show the eval loop and ownership model, not just enthusiasm."],
+    "channel_preferences": ["blog", "linkedin"],
+    "skepticism": 0.61,
+    "model_hint": "deepseek-v4-pro"
+  },
+  {
+    "id": "devtools-builder",
+    "name": "DevTools Builder",
+    "active": true,
+    "segments": ["ai-platform-devtools", "twitter-x", "solo-operators"],
+    "goals": ["reduce friction", "debug real workflows"],
+    "objections": ["If this cannot be installed or tried quickly, I will ignore it."],
+    "channel_preferences": ["twitter-x", "blog"],
+    "skepticism": 0.58,
+    "model_hint": "deepseek-v4-flash"
+  },
+  {
+    "id": "enterprise-governance-buyer",
+    "name": "Enterprise Governance Buyer",
+    "active": true,
+    "segments": ["enterprise-governance", "product-managers"],
+    "goals": ["control risk", "document repeatable decisions"],
+    "objections": ["Where is the audit trail and failure mode?"],
+    "channel_preferences": ["blog", "podcast"],
+    "skepticism": 0.69,
+    "model_hint": "glm-5.1:cloud"
+  },
+  {
+    "id": "skeptical-generalist-pm",
+    "name": "Skeptical Generalist PM",
+    "active": true,
+    "segments": ["skeptical-generalists", "linkedin", "product-managers"],
+    "goals": ["understand why this matters now", "avoid jargon"],
+    "objections": ["I do not know what a harness is and may not care."],
+    "channel_preferences": ["linkedin"],
+    "skepticism": 0.83,
+    "model_hint": "qwen3.5:cloud"
+  },
+  {
+    "id": "founder-operator",
+    "name": "Founder Operator",
+    "active": true,
+    "segments": ["solo-operators", "linkedin", "twitter-x"],
+    "goals": ["save time", "make better solo decisions"],
+    "objections": ["I need leverage this week, not a research system."],
+    "channel_preferences": ["linkedin", "twitter-x"],
+    "skepticism": 0.64,
+    "model_hint": "kimi-k2.6:cloud"
+  },
+  {
+    "id": "podcast-regular",
+    "name": "Produkt w Praktyce Regular",
+    "active": true,
+    "segments": ["produkt-w-praktyce", "product-managers"],
+    "goals": ["hear practical stories", "learn from operator mistakes"],
+    "objections": ["If there is no concrete story, this is not an episode."],
+    "channel_preferences": ["podcast"],
+    "skepticism": 0.57,
+    "model_hint": "deepseek-v4-pro"
+  },
+  {
+    "id": "linkedin-scroller",
+    "name": "LinkedIn Scroller",
+    "active": true,
+    "segments": ["linkedin", "skeptical-generalists"],
+    "goals": ["quickly decide if a post is worth attention"],
+    "objections": ["Lead with the conflict or I will scroll past."],
+    "channel_preferences": ["linkedin"],
+    "skepticism": 0.77,
+    "model_hint": "deepseek-v4-flash"
+  },
+  {
+    "id": "longform-blog-reader",
+    "name": "Longform Blog Reader",
+    "active": true,
+    "segments": ["blog", "ai-platform-devtools"],
+    "goals": ["understand the system", "save a reusable reference"],
+    "objections": ["A blog post needs structure and evidence, not vibes."],
+    "channel_preferences": ["blog"],
+    "skepticism": 0.55,
+    "model_hint": "glm-5.1:cloud"
+  },
+  {
+    "id": "twitter-systems-nerd",
+    "name": "Twitter/X Systems Nerd",
+    "active": true,
+    "segments": ["twitter-x", "ai-platform-devtools"],
+    "goals": ["find a sharp angle", "debate technical implications"],
+    "objections": ["Make it punchy; do not flatten the technical tension."],
+    "channel_preferences": ["twitter-x"],
+    "skepticism": 0.62,
+    "model_hint": "kimi-k2.6:cloud"
+  },
+  {
+    "id": "agency-product-lead",
+    "name": "Agency Product Lead",
+    "active": true,
+    "segments": ["product-managers", "linkedin"],
+    "goals": ["sell better discovery", "avoid overbuilding"],
+    "objections": ["How would this change client decisions?"],
+    "channel_preferences": ["linkedin", "blog"],
+    "skepticism": 0.66,
+    "model_hint": "qwen3.5:cloud"
+  },
+  {
+    "id": "ai-safety-pragmatist",
+    "name": "AI Safety Pragmatist",
+    "active": true,
+    "segments": ["enterprise-governance", "ai-platform-devtools"],
+    "goals": ["reduce harm", "make safety operational"],
+    "objections": ["Safety claims need testable controls."],
+    "channel_preferences": ["blog", "podcast"],
+    "skepticism": 0.74,
+    "model_hint": "deepseek-v4-pro"
+  },
+  {
+    "id": "nontechnical-product-owner",
+    "name": "Non-Technical Product Owner",
+    "active": true,
+    "segments": ["product-managers", "skeptical-generalists"],
+    "goals": ["understand AI work without becoming an engineer"],
+    "objections": ["Translate this into product risk and user value."],
+    "channel_preferences": ["linkedin", "podcast"],
+    "skepticism": 0.79,
+    "model_hint": "qwen3.5:cloud"
+  },
+  {
+    "id": "cto-reader",
+    "name": "CTO Reader",
+    "active": true,
+    "segments": ["blog", "ai-platform-devtools", "enterprise-governance"],
+    "goals": ["evaluate architecture tradeoffs", "avoid hidden ops cost"],
+    "objections": ["What breaks in production?"],
+    "channel_preferences": ["blog"],
+    "skepticism": 0.71,
+    "model_hint": "glm-5.1:cloud"
+  },
+  {
+    "id": "newsletter-curator",
+    "name": "Newsletter Curator",
+    "active": true,
+    "segments": ["linkedin", "blog"],
+    "goals": ["spot reusable framing", "recommend useful content"],
+    "objections": ["This needs a memorable thesis."],
+    "channel_preferences": ["linkedin", "blog"],
+    "skepticism": 0.54,
+    "model_hint": "kimi-k2.6:cloud"
+  },
+  {
+    "id": "workflow-automation-builder",
+    "name": "Workflow Automation Builder",
+    "active": true,
+    "segments": ["solo-operators", "ai-platform-devtools"],
+    "goals": ["automate repeated judgment", "keep control visible"],
+    "objections": ["Show where humans stay in the loop."],
+    "channel_preferences": ["blog", "twitter-x"],
+    "skepticism": 0.59,
+    "model_hint": "deepseek-v4-flash"
+  },
+  {
+    "id": "pm-lead-manager",
+    "name": "PM Lead Manager",
+    "active": true,
+    "segments": ["product-managers", "enterprise-governance"],
+    "goals": ["scale team judgment", "create repeatable standards"],
+    "objections": ["Will my team actually use this?"],
+    "channel_preferences": ["podcast", "linkedin"],
+    "skepticism": 0.68,
+    "model_hint": "deepseek-v4-pro"
+  },
+  {
+    "id": "early-career-pm",
+    "name": "Early-Career PM",
+    "active": true,
+    "segments": ["product-managers", "linkedin", "skeptical-generalists"],
+    "goals": ["learn what matters", "avoid sounding naive"],
+    "objections": ["Give me examples before abstractions."],
+    "channel_preferences": ["linkedin", "podcast"],
+    "skepticism": 0.63,
+    "model_hint": "qwen3.5:cloud"
+  },
+  {
+    "id": "ai-founder",
+    "name": "AI Founder",
+    "active": true,
+    "segments": ["solo-operators", "ai-platform-devtools", "twitter-x"],
+    "goals": ["find wedge products", "ship demos quickly"],
+    "objections": ["Does this create a product wedge or just content?"],
+    "channel_preferences": ["twitter-x", "linkedin"],
+    "skepticism": 0.6,
+    "model_hint": "kimi-k2.6:cloud"
+  },
+  {
+    "id": "market-skeptic",
+    "name": "Market Skeptic",
+    "active": true,
+    "segments": ["skeptical-generalists", "produkt-w-praktyce"],
+    "goals": ["avoid self-indulgent topics", "protect audience trust"],
+    "objections": ["This may be interesting to you but not to the audience."],
+    "channel_preferences": ["podcast", "linkedin"],
+    "skepticism": 0.88,
+    "model_hint": "deepseek-v4-flash"
+  }
+]
