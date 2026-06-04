@@ -1,0 +1,108 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --group dev
+      - name: Compile backend Python
+        working-directory: backend
+        run: uv run python -m compileall app scripts run.py
+      - name: Run backend tests
+        working-directory: backend
+        run: uv run pytest
+      - name: Ruff changed Python files
+        run: python3 scripts/ruff_changed.py
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+  compose:
+    name: Compose render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render RS2000 smoke compose
+        run: docker compose --env-file deploy/rs2000/.env.example -f deploy/rs2000/docker-compose.cloud-smoke.yml config --quiet
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files for obvious secrets
+        run: python3 scripts/check_secrets.py
+
+  docker-build:
+    name: Docker build sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image without pushing
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: mirofish-online:ci
+
+  fallow-advisory:
+    name: fallow-py advisory
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - name: Run fallow-py diff advisory
+        run: |
+          python3 scripts/fallow_advisory.py || {
+            echo "fallow-py advisory failed; keeping CI green because this is a baseline-only advisory gate."
+            exit 0
+          }
+      - name: Upload fallow-py advisory artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fallow-py-advisory
+          path: .quality/fallow-agent-fix-plan.json
+          if-no-files-found: ignore

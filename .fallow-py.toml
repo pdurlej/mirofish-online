@@ -1,0 +1,12 @@
+[tool.fallow_py]
+roots = ["backend/app", "backend/scripts"]
+entry = ["backend/run.py"]
+include_tests = true
+
+[tool.fallow_py.dupes]
+min_lines = 8
+min_tokens = 50
+
+[tool.fallow_py.health]
+max_cyclomatic = 14
+max_cognitive = 20
