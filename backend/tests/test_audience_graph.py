@@ -16,7 +16,11 @@ from app.audience import (
     build_fake_audience_run,
     load_default_personas,
 )
-from app.audience.live_runner import PersonaCallResult, _parse_and_validate
+from app.audience.live_runner import (
+    PersonaCallResult,
+    _parse_and_validate,
+    _reasoning_effort_for_model,
+)
 from app.utils.llm_client import LLMChatResult
 
 
@@ -62,6 +66,11 @@ def test_model_router_default_live_pool_is_flash_only():
     router = ModelRouter()
 
     assert router.model_pool == ("deepseek-v4-flash",)
+
+
+def test_deepseek_flash_uses_low_reasoning_effort():
+    assert _reasoning_effort_for_model("deepseek-v4-flash") == "low"
+    assert _reasoning_effort_for_model("deepseek-v4-pro") == "medium"
 
 
 def test_fake_audience_run_has_20_reactions_and_next_action():
