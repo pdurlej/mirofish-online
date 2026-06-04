@@ -17,7 +17,7 @@ services:
       - "traefik.http.routers.mirofish-online.rule=Host(`${MIROFISH_HOSTNAME:-mirofish.pdurlej.com}`)"
       - "traefik.http.routers.mirofish-online.entrypoints=${MIROFISH_TRAEFIK_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.mirofish-online.tls=true"
-      - "traefik.http.routers.mirofish-online.tls.certresolver=${MIROFISH_TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mirofish-online.tls.certresolver=${MIROFISH_TRAEFIK_CERTRESOLVER:-le}"
       - "traefik.http.routers.mirofish-online.middlewares=${MIROFISH_TRAEFIK_MIDDLEWARES:-ts-allowlist@file,security-headers@file}"
       - "traefik.http.services.mirofish-online.loadbalancer.server.port=3000"
     restart: unless-stopped
