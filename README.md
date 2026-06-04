@@ -2,6 +2,14 @@
 
 <img src="./static/image/mirofish-offline-banner.png" alt="MiroFish Offline" width="100%"/>
 
+# MiroFish-Online
+
+This fork tracks [`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline) and prepares a private RS2000 deployment profile for Piotr's platform: cloud LLM inference, local graph storage, and Tailnet-only exposure.
+
+See [`docs/rs2000-smoke.md`](docs/rs2000-smoke.md) for the platform-specific smoke profile. The upstream README below remains the baseline project documentation.
+
+---
+
 # MiroFish-Offline
 
 **Fully local fork of [MiroFish](https://github.com/666ghj/MiroFish) — no cloud APIs required. English UI.**

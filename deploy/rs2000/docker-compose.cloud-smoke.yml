@@ -1,0 +1,69 @@
+name: mirofish-online
+
+services:
+  mirofish:
+    build:
+      context: ../..
+    container_name: mirofish-online
+    env_file:
+      - path: ../../.env
+        required: false
+    ports:
+      - "127.0.0.1:${MIROFISH_UI_PORT:-13000}:3000"
+      - "127.0.0.1:${MIROFISH_API_PORT:-15001}:5001"
+    restart: unless-stopped
+    volumes:
+      - ../../backend/uploads:/app/backend/uploads
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      embedding-ollama:
+        condition: service_started
+    networks:
+      - mirofish-private
+
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: mirofish-online-neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1g
+      - NEO4J_server_memory_pagecache_size=512m
+    mem_limit: 2g
+    ports:
+      - "127.0.0.1:17474:7474"
+      - "127.0.0.1:17687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - mirofish-private
+
+  embedding-ollama:
+    image: ollama/ollama:latest
+    container_name: mirofish-online-embedding-ollama
+    ports:
+      - "127.0.0.1:11435:11434"
+    volumes:
+      - embedding_ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - mirofish-private
+
+networks:
+  mirofish-private:
+    name: mirofish_online_private
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  embedding_ollama_data:
