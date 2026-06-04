@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from flask import current_app, jsonify, request
 
+from ..config import Config
 from . import audience_bp
 from ..audience import (
+    AudienceLiveRunner,
     AudienceRunInput,
+    AudienceRunManager,
     InMemoryAudienceGraphStore,
     Neo4jAudienceGraphStore,
     build_fake_audience_run,
@@ -15,6 +18,11 @@ from ..audience import (
 
 
 _STORE = InMemoryAudienceGraphStore()
+_RUN_MANAGER = AudienceRunManager(
+    runner_factory=lambda: AudienceLiveRunner(
+        failure_threshold=Config.MIROFISH_AUDIENCE_FAILURE_THRESHOLD
+    )
+)
 
 
 def _get_store():
@@ -22,6 +30,15 @@ def _get_store():
     if storage:
         return Neo4jAudienceGraphStore(storage)
     return _STORE
+
+
+def _run_input_from_payload(payload: dict) -> AudienceRunInput:
+    return AudienceRunInput(
+        topic=str(payload.get("topic", "")),
+        channel=str(payload.get("channel", "unknown")),
+        title=payload.get("title"),
+        run_seed=str(payload.get("run_seed", "ui")),
+    )
 
 
 @audience_bp.route("/personas", methods=["GET"])
@@ -36,16 +53,32 @@ def list_personas():
     )
 
 
+@audience_bp.route("/runs", methods=["GET"])
+def list_runs():
+    try:
+        limit = min(max(int(request.args.get("limit", 25)), 1), 100)
+    except ValueError:
+        limit = 25
+    data = _get_store().list_runs(limit)
+    return jsonify({"success": True, "data": data, "count": len(data)})
+
+
+@audience_bp.route("/runs", methods=["POST"])
+def create_live_run():
+    payload = request.get_json(silent=True) or {}
+    try:
+        run_input = _run_input_from_payload(payload)
+        record = _RUN_MANAGER.enqueue(run_input, _get_store())
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "data": record}), 202
+
+
 @audience_bp.route("/runs/fake", methods=["POST"])
 def create_fake_run():
     payload = request.get_json(silent=True) or {}
     try:
-        run_input = AudienceRunInput(
-            topic=str(payload.get("topic", "")),
-            channel=str(payload.get("channel", "unknown")),
-            title=payload.get("title"),
-            run_seed=str(payload.get("run_seed", "ui")),
-        )
+        run_input = _run_input_from_payload(payload)
         store = _get_store()
         result = build_fake_audience_run(
             run_input,
@@ -62,7 +95,8 @@ def create_fake_run():
 
 @audience_bp.route("/runs/<run_id>", methods=["GET"])
 def get_run(run_id: str):
-    stored = _get_store().read_run(run_id)
+    store = _get_store()
+    stored = _RUN_MANAGER.get(run_id, store)
     if not stored:
         return jsonify({"success": False, "error": "Run not found"}), 404
     return jsonify({"success": True, "data": stored})

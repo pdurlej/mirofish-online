@@ -9,22 +9,32 @@
       <section class="audience-hero">
         <div>
           <p class="eyebrow">Piotr Durlej / Content and Product Thinking</p>
-          <h1>Test a topic against the first 20-person synthetic audience.</h1>
+          <h1>Test a topic against a 20-person synthetic audience.</h1>
           <p class="hero-copy">
-            This is the safe contract flow: no live OASIS, no public exposure,
-            no raw prompt storage. It proves the graph-shaped product loop before
-            we spend real model budget.
+            A private, Tailnet-first audience graph for podcast, LinkedIn, blog,
+            Twitter/X and product ideas. It uses local graph memory with cloud
+            models, then records token usage and reliability so the system can
+            earn its keep instead of becoming a shiny cost trap.
           </p>
         </div>
         <div class="status-panel">
           <div class="status-number">{{ personaCount }}</div>
           <div class="status-label">active personas</div>
-          <div class="status-note">fake run / graph contract</div>
+          <div class="status-note">{{ runMode === 'live' ? 'live model run' : 'fake contract run' }}</div>
         </div>
       </section>
 
       <section class="audience-grid">
         <form class="run-panel" @submit.prevent="submitRun">
+          <div class="mode-toggle">
+            <button type="button" :class="{ active: runMode === 'live' }" @click="runMode = 'live'">
+              Live
+            </button>
+            <button type="button" :class="{ active: runMode === 'fake' }" @click="runMode = 'fake'">
+              Test
+            </button>
+          </div>
+
           <label>
             Title
             <input v-model="form.title" type="text" placeholder="AI harnesses for PMs" />
@@ -52,10 +62,11 @@
           </label>
 
           <button class="primary-button" type="submit" :disabled="!canSubmit || loading">
-            <span>{{ loading ? 'Running audience...' : 'Run audience graph smoke' }}</span>
+            <span>{{ buttonLabel }}</span>
             <span>→</span>
           </button>
 
+          <p v-if="runStatus" class="status-text">{{ runStatus }}</p>
           <p v-if="error" class="error-text">{{ error }}</p>
         </form>
 
@@ -63,8 +74,9 @@
           <div v-if="!result" class="empty-result">
             <h2>Waiting for a topic</h2>
             <p>
-              The first report will show channel fit, objections, model attribution,
-              similarity edges, and the recommended next action.
+              The report will show channel fit, objections, model attribution,
+              similarity to previous topics, token usage, reliability and the
+              recommended next action.
             </p>
           </div>
 
@@ -88,6 +100,18 @@
                 <strong>{{ result.similarity_edges.length }}</strong>
                 <span>similar topics</span>
               </div>
+              <div>
+                <strong>{{ receipt.usage?.total_tokens || 0 }}</strong>
+                <span>tokens</span>
+              </div>
+              <div>
+                <strong>{{ reliabilityLabel }}</strong>
+                <span>reliability</span>
+              </div>
+              <div>
+                <strong>{{ receipt.pricing || 'unknown' }}</strong>
+                <span>pricing</span>
+              </div>
             </div>
 
             <h3>Strongest objections</h3>
@@ -98,15 +122,38 @@
               </li>
             </ul>
 
-            <h3>Persona/model attribution</h3>
+            <h3>Model attribution</h3>
             <div class="persona-list">
-              <div v-for="persona in result.personas.slice(0, 8)" :key="persona.id">
+              <div v-for="persona in result.personas.slice(0, 10)" :key="persona.id">
                 <strong>{{ persona.name }}</strong>
                 <span>{{ persona.model_assignment.model }}</span>
               </div>
             </div>
           </div>
         </section>
+      </section>
+
+      <section class="history-panel">
+        <div class="section-title">
+          <h2>Previous topics</h2>
+          <button class="small-button" @click="loadHistory">Refresh</button>
+        </div>
+        <div v-if="history.length === 0" class="history-empty">
+          No previous audience runs yet.
+        </div>
+        <div v-else class="history-list">
+          <button
+            v-for="item in history"
+            :key="item.run_id"
+            class="history-item"
+            type="button"
+            @click="loadRun(item.run_id)"
+          >
+            <strong>{{ item.title || item.run_id }}</strong>
+            <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
+            <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
+          </button>
+        </div>
       </section>
     </main>
   </div>
@@ -115,13 +162,22 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { createFakeAudienceRun, listAudiencePersonas } from '../api/audience'
+import {
+  createFakeAudienceRun,
+  createLiveAudienceRun,
+  getAudienceRun,
+  listAudiencePersonas,
+  listAudienceRuns
+} from '../api/audience'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const result = ref(null)
 const personaCount = ref(20)
+const runMode = ref('live')
+const runStatus = ref('')
+const history = ref([])
 
 const form = reactive({
   title: '',
@@ -131,30 +187,91 @@ const form = reactive({
 
 const canSubmit = computed(() => form.topic.trim().length >= 12)
 const topObjections = computed(() => result.value?.objections.slice(0, 6) || [])
+const receipt = computed(() => result.value?.receipt || {})
+const reliabilityLabel = computed(() => receipt.value.reliability_grade || 'unknown')
+const buttonLabel = computed(() => {
+  if (loading.value) return runMode.value === 'live' ? 'Running live audience...' : 'Running test...'
+  return runMode.value === 'live' ? 'Run live audience' : 'Run test contract'
+})
 
 onMounted(async () => {
+  await Promise.all([loadPersonas(), loadHistory()])
+})
+
+const loadPersonas = async () => {
   try {
     const response = await listAudiencePersonas()
     personaCount.value = response.count || response.data?.length || 20
   } catch (_err) {
     personaCount.value = 20
   }
-})
+}
+
+const loadHistory = async () => {
+  try {
+    const response = await listAudienceRuns(25)
+    history.value = response.data || []
+  } catch (_err) {
+    history.value = []
+  }
+}
 
 const submitRun = async () => {
   if (!canSubmit.value || loading.value) return
   loading.value = true
   error.value = ''
+  runStatus.value = ''
   try {
-    const response = await createFakeAudienceRun({
+    const payload = {
       title: form.title,
       channel: form.channel,
       topic: form.topic,
-      run_seed: 'ui'
-    })
-    result.value = response.data
+      run_seed: `ui-${Date.now()}`
+    }
+    if (runMode.value === 'fake') {
+      const response = await createFakeAudienceRun(payload)
+      result.value = response.data
+      runStatus.value = 'Test run completed.'
+    } else {
+      const response = await createLiveAudienceRun(payload)
+      await pollRun(response.data.run_id)
+    }
+    await loadHistory()
   } catch (err) {
     error.value = err?.message || 'Audience run failed'
+  } finally {
+    loading.value = false
+  }
+}
+
+const pollRun = async (runId) => {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const response = await getAudienceRun(runId)
+    const record = response.data
+    runStatus.value = `Status: ${record.status}`
+    if (record.status === 'completed') {
+      result.value = record.data
+      runStatus.value = 'Live run completed.'
+      return
+    }
+    if (record.status === 'failed') {
+      throw new Error(`Live run failed: ${record.error_kind || 'unknown'}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+  }
+  throw new Error('Live run timed out')
+}
+
+const loadRun = async (runId) => {
+  loading.value = true
+  error.value = ''
+  try {
+    const response = await getAudienceRun(runId)
+    const record = response.data
+    result.value = record.data || record
+    runStatus.value = `Loaded ${runId}`
+  } catch (err) {
+    error.value = err?.message || 'Could not load run'
   } finally {
     loading.value = false
   }
@@ -211,7 +328,7 @@ h1 {
 }
 
 .hero-copy {
-  max-width: 720px;
+  max-width: 760px;
   color: #555;
   font-size: 1rem;
   line-height: 1.7;
@@ -220,12 +337,16 @@ h1 {
 
 .status-panel,
 .run-panel,
-.result-panel {
+.result-panel,
+.history-panel {
   border: 1px solid #d9d4c8;
   background: #fffdf8;
 }
 
-.status-panel {
+.status-panel,
+.run-panel,
+.result-panel,
+.history-panel {
   padding: 24px;
 }
 
@@ -246,9 +367,25 @@ h1 {
   gap: 28px;
 }
 
-.run-panel,
-.result-panel {
-  padding: 24px;
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.mode-toggle button,
+.small-button {
+  border: 1px solid #cbc4b5;
+  background: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mode-toggle button.active {
+  background: #111;
+  color: #fff;
 }
 
 label {
@@ -305,6 +442,11 @@ button {
   padding: 8px 12px;
 }
 
+.status-text {
+  color: #555;
+  margin-top: 14px;
+}
+
 .error-text {
   color: #b42318;
   margin-top: 14px;
@@ -352,7 +494,7 @@ button {
 }
 
 .metric-row strong {
-  font-size: 1.8rem;
+  font-size: 1.45rem;
 }
 
 .metric-row span {
@@ -392,10 +534,54 @@ button {
   font-size: 0.78rem;
 }
 
+.history-panel {
+  margin-top: 28px;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.history-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-item {
+  text-align: left;
+  border: 1px solid #e2ddd2;
+  background: #fff;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.history-item strong,
+.history-item span {
+  display: block;
+}
+
+.history-item span {
+  color: #666;
+  margin-top: 6px;
+}
+
+.history-empty {
+  color: #666;
+}
+
 @media (max-width: 880px) {
   .audience-hero,
-  .audience-grid {
+  .audience-grid,
+  .history-list {
     grid-template-columns: 1fr;
+  }
+
+  .metric-row {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

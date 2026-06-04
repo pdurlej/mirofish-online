@@ -1,223 +1,89 @@
-<div align="center">
+# MiroFish Online
 
-<img src="./static/image/mirofish-offline-banner.png" alt="MiroFish Offline" width="100%"/>
+MiroFish Online is Piotr Durlej's private synthetic-audience graph for content
+and product thinking. It is a fork of
+[`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline),
+but the current product direction is narrower and more practical:
 
-# MiroFish-Online
+> Test podcast, LinkedIn, blog, Twitter/X, and product ideas against a stable
+> 20-person synthetic audience, then remember the reactions as a private graph.
 
-MiroFish-Online is Piotr's private audience-simulation fork of
-[`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline).
-The goal is to test podcast, writing, product, and strategy ideas against
-simulated audiences before spending real operator time on them.
+The goal is not to be a generic chatbot or a heavy OASIS-first simulator. The
+goal is to change Piotr's next action: publish, rewrite, narrow, abandon, turn
+into a podcast, turn into a post, or save for later.
 
-This fork is optimized for Piotr's RS2000 platform:
+## Current Direction
 
-- cloud LLM inference through OpenAI-compatible providers, starting with Ollama Cloud / Qwen;
-- local graph memory through Neo4j for the first smoke, without Zep Cloud lock-in;
-- Tailnet-only exposure at `mirofish.pdurlej.com`;
-- no backup or production commitment until the first real simulations prove value.
+- **Private Audience Graph** for Piotr's public audience and product ideas.
+- **20 canonical synthetic personas** with stable identities and segments.
+- **Neo4j graph memory** for topics, reactions, objections, recommendations,
+  and similarity between previous ideas.
+- **Cloud model ensemble** through an OpenAI-compatible endpoint, with local
+  graph storage. This is not advertised as free or fully offline.
+- **Tailnet-first deployment** on RS2000 at `mirofish.pdurlej.com`.
 
-See [`docs/north-star.md`](docs/north-star.md) for the canonical Private Audience Graph direction. See [`docs/north-star-smoke-plan.md`](docs/north-star-smoke-plan.md) for the earlier first useful smoke definition, and [`docs/rs2000-smoke.md`](docs/rs2000-smoke.md) for the platform-specific smoke profile. The upstream README below remains the baseline project documentation.
+This is an optimum for a solo operator without a very strong local GPU: private
+graph and UI locally, model inference through cloud APIs, and explicit cost /
+reliability receipts per run.
 
----
+## What Works Now
 
-# MiroFish-Offline
+- Private `/audience` UI flow.
+- Fake contract run for testing graph writes without spending model budget.
+- Live audience run path with 20 personas, model attribution, token usage,
+  reliability metadata, and Neo4j persistence.
+- History of previous topic runs and similarity edges.
+- RS2000 smoke checks for private deployment shape.
 
-**Fully local fork of [MiroFish](https://github.com/666ghj/MiroFish) — no cloud APIs required. English UI.**
+## What Is Deferred
 
-*A multi-agent swarm intelligence engine that simulates public opinion, market sentiment, and social dynamics. Entirely on your hardware.*
+- OASIS/CAMEL full simulation.
+- Zep Cloud.
+- Public multi-user SaaS exposure.
+- Backup commitment for MiroFish graph data.
+- Postgres adapter.
 
-[![GitHub Stars](https://img.shields.io/github/stars/nikmcfly/MiroFish-Offline?style=flat-square&color=DAA520)](https://github.com/nikmcfly/MiroFish-Offline/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/nikmcfly/MiroFish-Offline?style=flat-square)](https://github.com/nikmcfly/MiroFish-Offline/network)
-[![Docker](https://img.shields.io/badge/Docker-Build-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](./LICENSE)
+OASIS remains a future North Star for cases where the argument between audience
+segments is itself useful, for example as a podcast format. It is not the core
+runtime path for this phase.
 
-</div>
-
-## What is this?
-
-MiroFish is a multi-agent simulation engine: upload any document (press release, policy draft, financial report), and it generates hundreds of AI agents with unique personalities that simulate the public reaction on social media. Posts, arguments, opinion shifts — hour by hour.
-
-The [original MiroFish](https://github.com/666ghj/MiroFish) was built for the Chinese market (Chinese UI, Zep Cloud for knowledge graphs, DashScope API). This fork makes it **fully local and fully English**:
-
-| Original MiroFish | MiroFish-Offline |
-|---|---|
-| Chinese UI | **English UI** (1,000+ strings translated) |
-| Zep Cloud (graph memory) | **Neo4j Community Edition 5.15** |
-| DashScope / OpenAI API (LLM) | **Ollama** (qwen2.5, llama3, etc.) |
-| Zep Cloud embeddings | **nomic-embed-text** via Ollama |
-| Cloud API keys required | **Zero cloud dependencies** |
-
-## Workflow
-
-1. **Graph Build** — Extracts entities (people, companies, events) and relationships from your document. Builds a knowledge graph with individual and group memory via Neo4j.
-2. **Env Setup** — Generates hundreds of agent personas, each with unique personality, opinion bias, reaction speed, influence level, and memory of past events.
-3. **Simulation** — Agents interact on simulated social platforms: posting, replying, arguing, shifting opinions. The system tracks sentiment evolution, topic propagation, and influence dynamics in real time.
-4. **Report** — A ReportAgent analyzes the post-simulation environment, interviews a focus group of agents, searches the knowledge graph for evidence, and generates a structured analysis.
-5. **Interaction** — Chat with any agent from the simulated world. Ask them why they posted what they posted. Full memory and personality persists.
-
-## Screenshot
-
-<div align="center">
-<img src="./static/image/mirofish-offline-screenshot.jpg" alt="MiroFish Offline — English UI" width="100%"/>
-</div>
-
-## Quick Start
-
-### Prerequisites
-
-- Docker & Docker Compose (recommended), **or**
-- Python 3.11+, Node.js 18+, Neo4j 5.15+, Ollama
-
-### Option A: Docker (easiest)
+## Local Checks
 
 ```bash
-git clone https://github.com/nikmcfly/MiroFish-Offline.git
-cd MiroFish-Offline
-cp .env.example .env
-
-# Start all services (Neo4j, Ollama, MiroFish)
-docker compose up -d
-
-# Pull the required models into Ollama
-docker exec mirofish-ollama ollama pull qwen2.5:32b
-docker exec mirofish-ollama ollama pull nomic-embed-text
+npm run check
 ```
 
-Open `http://localhost:3000` — that's it.
-
-### Option B: Manual
-
-**1. Start Neo4j**
+Useful focused checks:
 
 ```bash
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/mirofish \
-  neo4j:5.15-community
+cd backend && uv run pytest
+python3 scripts/model_inventory.py --json
+python3 scripts/rs2000_smoke_check.py
 ```
 
-**2. Start Ollama & pull models**
+## Deployment Shape
 
-```bash
-ollama serve &
-ollama pull qwen2.5:32b      # LLM (or qwen2.5:14b for less VRAM)
-ollama pull nomic-embed-text  # Embeddings (768d)
-```
+The RS2000 deployment keeps externally risky services private:
 
-**3. Configure & run backend**
+- UI exposed through the existing private route.
+- Backend API same-origin through the UI path.
+- Neo4j HTTP/Bolt bound locally/private only.
+- Embedding Ollama sidecar is local/private.
+- Cloud LLM keys stay in runtime secrets, never in repo artifacts.
 
-```bash
-cp .env.example .env
-# Edit .env if your Neo4j/Ollama are on non-default ports
+## North Star
 
-cd backend
-pip install -r requirements.txt
-python run.py
-```
+See [`docs/north-star.md`](docs/north-star.md) for the canonical product
+direction.
 
-**4. Run frontend**
+## Upstream Heritage
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+This fork inherits ideas and code from MiroFish / MiroFish-Offline:
 
-Open `http://localhost:3000`.
+- multi-agent simulation concepts;
+- Neo4j graph memory direction;
+- OASIS/CAMEL simulation lineage;
+- AGPL-3.0 license.
 
-## Configuration
-
-All settings are in `.env` (copy from `.env.example`):
-
-```bash
-# LLM — points to local Ollama (OpenAI-compatible API)
-LLM_API_KEY=ollama
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL_NAME=qwen2.5:32b
-
-# Neo4j
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=mirofish
-
-# Embeddings
-EMBEDDING_MODEL=nomic-embed-text
-EMBEDDING_BASE_URL=http://localhost:11434
-```
-
-Works with any OpenAI-compatible API — swap Ollama for Claude, GPT, or any other provider by changing `LLM_BASE_URL` and `LLM_API_KEY`.
-
-## Architecture
-
-This fork introduces a clean abstraction layer between the application and the graph database:
-
-```
-┌─────────────────────────────────────────┐
-│              Flask API                   │
-│  graph.py  simulation.py  report.py     │
-└──────────────┬──────────────────────────┘
-               │ app.extensions['neo4j_storage']
-┌──────────────▼──────────────────────────┐
-│           Service Layer                  │
-│  EntityReader  GraphToolsService         │
-│  GraphMemoryUpdater  ReportAgent         │
-└──────────────┬──────────────────────────┘
-               │ storage: GraphStorage
-┌──────────────▼──────────────────────────┐
-│         GraphStorage (abstract)          │
-│              │                            │
-│    ┌─────────▼─────────┐                │
-│    │   Neo4jStorage     │                │
-│    │  ┌───────────────┐ │                │
-│    │  │ EmbeddingService│ ← Ollama       │
-│    │  │ NERExtractor   │ ← Ollama LLM   │
-│    │  │ SearchService  │ ← Hybrid search │
-│    │  └───────────────┘ │                │
-│    └───────────────────┘                │
-└─────────────────────────────────────────┘
-               │
-        ┌──────▼──────┐
-        │  Neo4j CE   │
-        │  5.15       │
-        └─────────────┘
-```
-
-**Key design decisions:**
-
-- `GraphStorage` is an abstract interface — swap Neo4j for any other graph DB by implementing one class
-- Dependency injection via Flask `app.extensions` — no global singletons
-- Hybrid search: 0.7 × vector similarity + 0.3 × BM25 keyword search
-- Synchronous NER/RE extraction via local LLM (replaces Zep's async episodes)
-- All original dataclasses and LLM tools (InsightForge, Panorama, Agent Interviews) preserved
-
-## Hardware Requirements
-
-| Component | Minimum | Recommended |
-|---|---|---|
-| RAM | 16 GB | 32 GB |
-| VRAM (GPU) | 10 GB (14b model) | 24 GB (32b model) |
-| Disk | 20 GB | 50 GB |
-| CPU | 4 cores | 8+ cores |
-
-CPU-only mode works but is significantly slower for LLM inference. For lighter setups, use `qwen2.5:14b` or `qwen2.5:7b`.
-
-## Use Cases
-
-- **PR crisis testing** — simulate the public reaction to a press release before publishing
-- **Trading signal generation** — feed financial news and observe simulated market sentiment
-- **Policy impact analysis** — test draft regulations against simulated public response
-- **Creative experiments** — someone fed it a classical Chinese novel with a lost ending; the agents wrote a narratively consistent conclusion
-
-## License
-
-AGPL-3.0 — same as the original MiroFish project. See [LICENSE](./LICENSE).
-
-## Credits & Attribution
-
-This is a modified fork of [MiroFish](https://github.com/666ghj/MiroFish) by [666ghj](https://github.com/666ghj), originally supported by [Shanda Group](https://www.shanda.com/). The simulation engine is powered by [OASIS](https://github.com/camel-ai/oasis) from the CAMEL-AI team.
-
-**Modifications in this fork:**
-- Backend migrated from Zep Cloud to local Neo4j CE 5.15 + Ollama
-- Entire frontend translated from Chinese to English (20 files, 1,000+ strings)
-- All Zep references replaced with Neo4j across the UI
-- Rebranded to MiroFish Offline
+The public upstream is broader. This fork is intentionally narrower: Piotr's
+private audience graph first, full simulation later only if it proves its value.

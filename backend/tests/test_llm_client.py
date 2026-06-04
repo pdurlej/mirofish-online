@@ -3,6 +3,64 @@ import pytest
 from app.utils.llm_client import LLMClient
 
 
+class FakeUsage:
+    def model_dump(self):
+        return {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
+
+
+class FakeMessage:
+    content = "<think>hidden</think>OK"
+
+
+class FakeChoice:
+    message = FakeMessage()
+    finish_reason = "stop"
+
+
+class FakeResponse:
+    model = "deepseek-v4-flash"
+    choices = [FakeChoice()]
+    usage = FakeUsage()
+
+
+class FakeCompletions:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return FakeResponse()
+
+
+class FakeChat:
+    def __init__(self):
+        self.completions = FakeCompletions()
+
+
+class FakeOpenAIClient:
+    def __init__(self):
+        self.chat = FakeChat()
+
+
+def test_chat_with_metadata_returns_usage_and_sanitized_content():
+    client = object.__new__(LLMClient)
+    client.client = FakeOpenAIClient()
+    client.base_url = "https://ollama.example/v1"
+    client.model = "default-model"
+    client._num_ctx = 8192
+
+    result = client.chat_with_metadata(messages=[], model="deepseek-v4-flash")
+
+    assert result.content == "OK"
+    assert result.model == "deepseek-v4-flash"
+    assert result.usage == {
+        "prompt_tokens": 3,
+        "completion_tokens": 4,
+        "total_tokens": 7,
+    }
+    assert result.finish_reason == "stop"
+
+
 def test_chat_json_accepts_json_object_with_trailing_text():
     client = object.__new__(LLMClient)
 

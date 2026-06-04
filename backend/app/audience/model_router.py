@@ -12,11 +12,11 @@ from .personas import AudiencePersona
 DEFAULT_MODEL_POOL = (
     "deepseek-v4-pro",
     "deepseek-v4-flash",
-    "glm-5.1:cloud",
-    "kimi-k2.6:cloud",
-    "qwen3.5:cloud",
+    "glm-5.1",
+    "kimi-k2.6",
+    "minimax-m3",
 )
-HIGH_QUALITY_RETRY_MODEL = "qwen3.5:397b-cloud"
+HIGH_QUALITY_RETRY_MODEL = "qwen3.5:397b"
 
 
 @dataclass(frozen=True)
@@ -65,10 +65,11 @@ class ModelRouter:
                 reason="high_quality_retry",
             )
 
-        if persona.model_hint and persona.model_hint in self.model_pool:
+        persona_model_hint = _normalize_model_id(persona.model_hint)
+        if persona_model_hint and persona_model_hint in self.model_pool:
             return ModelAssignment(
                 persona_id=persona.id,
-                model=persona.model_hint,
+                model=persona_model_hint,
                 seed=seed,
                 reason="persona_hint",
             )
@@ -87,5 +88,11 @@ def _model_pool_from_env() -> tuple[str, ...]:
     raw = os.environ.get("MIROFISH_AUDIENCE_MODEL_POOL")
     if not raw:
         return DEFAULT_MODEL_POOL
-    values = tuple(value.strip() for value in raw.split(",") if value.strip())
+    values = tuple(_normalize_model_id(value.strip()) for value in raw.split(",") if value.strip())
     return values or DEFAULT_MODEL_POOL
+
+
+def _normalize_model_id(model: str | None) -> str | None:
+    if not model:
+        return model
+    return model.removesuffix(":cloud")

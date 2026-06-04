@@ -52,6 +52,8 @@ class AudienceRunResult:
     insights: list[dict[str, Any]]
     recommendation: dict[str, Any]
     similarity_edges: list[dict[str, Any]]
+    receipt: dict[str, Any] | None = None
+    failures: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +66,8 @@ class AudienceRunResult:
             "insights": self.insights,
             "recommendation": self.recommendation,
             "similarity_edges": self.similarity_edges,
+            "receipt": self.receipt or _empty_receipt(),
+            "failures": self.failures or [],
         }
 
 
@@ -229,6 +233,24 @@ def _next_action_for(run_input: AudienceRunInput) -> str:
     if run_input.channel == "unknown":
         return "Choose the channel before drafting the final version."
     return "Rewrite the topic around the strongest audience objection."
+
+
+def _empty_receipt() -> dict[str, Any]:
+    return {
+        "mode": "fake",
+        "pricing": "unknown",
+        "models": {},
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        "latency_ms": 0,
+        "schema_fallback_count": 0,
+        "failed_persona_count": 0,
+        "failure_rate": 0.0,
+        "reliability_grade": "test",
+    }
 
 
 def _similarity_edges(
