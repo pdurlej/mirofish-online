@@ -49,12 +49,17 @@ jobs:
         run: npm run build --prefix frontend
 
   compose:
-    name: Compose render
+    name: Compose and smoke profile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Render RS2000 smoke compose
         run: docker compose --env-file deploy/rs2000/.env.example -f deploy/rs2000/docker-compose.cloud-smoke.yml config --quiet
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate RS2000 private smoke profile
+        run: python3 scripts/rs2000_smoke_check.py
 
   secret-scan:
     name: Secret scan
