@@ -19,7 +19,9 @@ into a podcast, turn into a post, or save for later.
 - **Neo4j graph memory** for topics, reactions, objections, recommendations,
   and similarity between previous ideas.
 - **Cloud model ensemble** through an OpenAI-compatible endpoint, with local
-  graph storage. This is not advertised as free or fully offline.
+  graph storage. The live default currently favors the models that pass
+  structured-output smoke reliably; broader GLM/Kimi/Minimax routing remains a
+  measured candidate path, not a promise.
 - **Tailnet-first deployment** on RS2000 at `mirofish.pdurlej.com`.
 
 This is an optimum for a solo operator without a very strong local GPU: private

@@ -12,9 +12,6 @@ from .personas import AudiencePersona
 DEFAULT_MODEL_POOL = (
     "deepseek-v4-pro",
     "deepseek-v4-flash",
-    "glm-5.1",
-    "kimi-k2.6",
-    "minimax-m3",
 )
 HIGH_QUALITY_RETRY_MODEL = "qwen3.5:397b"
 
