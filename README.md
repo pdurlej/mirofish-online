@@ -4,7 +4,17 @@
 
 # MiroFish-Online
 
-This fork tracks [`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline) and prepares a private RS2000 deployment profile for Piotr's platform: cloud LLM inference, local graph storage, and Tailnet-only exposure.
+MiroFish-Online is Piotr's private audience-simulation fork of
+[`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline).
+The goal is to test podcast, writing, product, and strategy ideas against
+simulated audiences before spending real operator time on them.
+
+This fork is optimized for Piotr's RS2000 platform:
+
+- cloud LLM inference through OpenAI-compatible providers, starting with Ollama Cloud / Qwen;
+- local graph memory through Neo4j for the first smoke, without Zep Cloud lock-in;
+- Tailnet-only exposure at `mirofish.pdurlej.com`;
+- no backup or production commitment until the first real simulations prove value.
 
 See [`docs/rs2000-smoke.md`](docs/rs2000-smoke.md) for the platform-specific smoke profile. The upstream README below remains the baseline project documentation.
 
