@@ -115,6 +115,29 @@ class LLMClient:
         cleaned_response = cleaned_response.strip()
 
         try:
+            return self._parse_json_response(cleaned_response)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Invalid JSON format from LLM "
+                f"(chars={len(cleaned_response)}, error={exc.msg})"
+            ) from exc
+
+    @staticmethod
+    def _parse_json_response(cleaned_response: str) -> Dict[str, Any]:
+        """Parse a JSON object from model output without exposing raw content on failure."""
+        try:
             return json.loads(cleaned_response)
         except json.JSONDecodeError:
-            raise ValueError(f"Invalid JSON format from LLM: {cleaned_response}")
+            start = cleaned_response.find("{")
+            if start < 0:
+                raise
+
+            decoder = json.JSONDecoder()
+            parsed, _ = decoder.raw_decode(cleaned_response[start:])
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError(
+                    "top-level JSON value is not an object",
+                    cleaned_response,
+                    start,
+                )
+            return parsed
