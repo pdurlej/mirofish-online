@@ -22,6 +22,7 @@ _RUN_MANAGER = AudienceRunManager(
     runner_factory=lambda: AudienceLiveRunner(
         failure_threshold=Config.MIROFISH_AUDIENCE_FAILURE_THRESHOLD,
         call_timeout_seconds=Config.MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS,
+        run_timeout_seconds=Config.MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS,
         max_workers=Config.MIROFISH_AUDIENCE_MAX_WORKERS,
     )
 )

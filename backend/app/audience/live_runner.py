@@ -6,7 +6,7 @@ import json
 import re
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -64,14 +64,16 @@ class AudienceLiveRunner:
         client_factory: Callable[[], LLMClient] | None = None,
         model_router: ModelRouter | None = None,
         failure_threshold: float = 0.30,
-        call_timeout_seconds: float = 75,
-        max_workers: int = 5,
+        call_timeout_seconds: float = 45,
+        run_timeout_seconds: float = 210,
+        max_workers: int = 10,
     ) -> None:
         self._client_factory = client_factory or (
             lambda: LLMClient(timeout=call_timeout_seconds)
         )
         self._model_router = model_router or ModelRouter()
         self._failure_threshold = failure_threshold
+        self._run_timeout_seconds = run_timeout_seconds
         self._max_workers = max(1, max_workers)
 
     def run(
@@ -101,7 +103,9 @@ class AudienceLiveRunner:
         receipt = _empty_live_receipt()
 
         future_map = {}
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+        timed_out = False
+        executor = ThreadPoolExecutor(max_workers=self._max_workers)
+        try:
             for persona in active_personas:
                 assignment = self._model_router.assign(persona, run_input.run_seed, run_id)
                 personas_payload.append(persona.to_dict() | {"model_assignment": assignment.to_dict()})
@@ -113,7 +117,7 @@ class AudienceLiveRunner:
                 )
                 future_map[future] = (persona, assignment)
 
-            for future in as_completed(future_map):
+            for future in as_completed(future_map, timeout=self._run_timeout_seconds):
                 persona, assignment = future_map[future]
                 try:
                     call = future.result()
@@ -154,6 +158,23 @@ class AudienceLiveRunner:
                         }
                     )
                     _record_failure(receipt, assignment.model)
+        except FuturesTimeoutError:
+            timed_out = True
+            receipt["run_timed_out"] = True
+            for future, (persona, assignment) in future_map.items():
+                if future.done():
+                    continue
+                future.cancel()
+                failures.append(
+                    {
+                        "persona_id": persona.id,
+                        "model": assignment.model,
+                        "error_kind": "run_timeout",
+                    }
+                )
+                _record_failure(receipt, assignment.model)
+        finally:
+            executor.shutdown(wait=not timed_out, cancel_futures=True)
 
         if len(failures) / len(active_personas) > self._failure_threshold:
             raise AudienceRunFailed("failure_threshold_exceeded")
@@ -356,6 +377,7 @@ def _empty_live_receipt() -> dict[str, Any]:
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "latency_ms": 0,
         "schema_fallback_count": 0,
+        "run_timed_out": False,
         "failed_persona_count": 0,
         "failure_rate": 0.0,
         "reliability_grade": "unknown",

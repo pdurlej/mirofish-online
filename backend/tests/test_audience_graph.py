@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from app.audience import (
@@ -15,7 +16,7 @@ from app.audience import (
     build_fake_audience_run,
     load_default_personas,
 )
-from app.audience.live_runner import _parse_and_validate
+from app.audience.live_runner import PersonaCallResult, _parse_and_validate
 from app.utils.llm_client import LLMChatResult
 
 
@@ -180,6 +181,57 @@ def test_live_audience_runner_failure_threshold_does_not_leak_topic():
         raise AssertionError("expected failure")
 
     assert "SECRET_PRIVATE_TOPIC" not in message
+
+
+def test_live_audience_runner_times_out_slow_personas_without_hanging():
+    personas = load_default_personas()[:2]
+    slow_persona_id = personas[1].id
+
+    class SlowOneRunner(AudienceLiveRunner):
+        def _call_persona(self, run_input, persona, model):  # noqa: ANN001
+            if persona.id == slow_persona_id:
+                time.sleep(0.3)
+            return PersonaCallResult(
+                parsed={
+                    "stance": "interested",
+                    "channel_fit": "linkedin strong",
+                    "summary": "This angle is concrete enough for a product audience.",
+                    "objection": "Explain the buyer and practical consequence.",
+                    "objection_severity": "medium",
+                    "insight": "Frame the idea through a decision PMs already make.",
+                    "decision_impact": "rewrite around practical PM decisions",
+                },
+                metadata=LLMChatResult(
+                    content="{}",
+                    model=model,
+                    usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                    latency_ms=123,
+                    finish_reason="stop",
+                ),
+                schema_fallback_used=False,
+            )
+
+    runner = SlowOneRunner(
+        failure_threshold=0.75,
+        run_timeout_seconds=0.05,
+        max_workers=2,
+    )
+
+    result = runner.run(
+        AudienceRunInput(topic="Should PMs care about AI harnesses?", run_seed="timeout"),
+        personas=personas,
+    )
+
+    assert len(result.reactions) == 1
+    assert result.failures == [
+        {
+            "persona_id": slow_persona_id,
+            "model": "deepseek-v4-flash",
+            "error_kind": "run_timeout",
+        }
+    ]
+    assert result.receipt["run_timed_out"] is True
+    assert result.receipt["failed_persona_count"] == 1
 
 
 def test_audience_graph_smoke_receipt_is_sanitized(tmp_path):
