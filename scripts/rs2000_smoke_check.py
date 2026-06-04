@@ -89,6 +89,10 @@ def validate_traefik_shape(services: dict[str, Any]) -> None:
         labels.get("traefik.http.services.mirofish-online.loadbalancer.server.port") == "3000",
         "Traefik must target the UI service port 3000 only",
     )
+    require(
+        labels.get("traefik.http.routers.mirofish-online.tls.certresolver") == "le",
+        "Traefik TLS certresolver must match the platform resolver 'le'",
+    )
     for key, value in labels.items():
         if key.startswith("traefik.http.services.") and str(value) in FORBIDDEN_TRAEFIK_PORTS:
             raise CheckFailure(f"Traefik label {key} exposes forbidden raw service port {value}")
@@ -129,6 +133,7 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
         "required services exist",
         "all published ports are host-local",
         "Traefik routes UI port 3000 only",
+        "Traefik uses the platform TLS certresolver le",
         "Neo4j memory limit is bounded to 2 GiB",
         "Neo4j/Bolt/backend/Ollama are not joined to platform-proxy",
     ]
