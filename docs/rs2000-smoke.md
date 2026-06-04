@@ -91,10 +91,22 @@ Expected exposure shape:
 ## Health checks
 
 ```bash
+python3 scripts/rs2000_smoke_check.py
 curl -fsS http://127.0.0.1:15001/health
 curl -fsS http://127.0.0.1:13000/
 docker ps --filter name=mirofish-online --format 'table {{.Names}}\t{{.Status}}'
 ```
+
+If the stack is already running, use the runtime probe:
+
+```bash
+python3 scripts/rs2000_smoke_check.py --runtime
+```
+
+Record a sanitized receipt from
+[`../smoke/receipts/TEMPLATE.md`](../smoke/receipts/TEMPLATE.md). The first
+product input fixture is
+[`../smoke/fixtures/first-product-smoke.md`](../smoke/fixtures/first-product-smoke.md).
 
 ## Platform integration gate
 
