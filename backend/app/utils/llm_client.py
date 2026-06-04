@@ -51,6 +51,7 @@ class LLMClient:
         max_tokens: int = 4096,
         response_format: Optional[Dict] = None,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> str:
         """
         Send chat request
@@ -73,6 +74,9 @@ class LLMClient:
 
         if response_format:
             kwargs["response_format"] = response_format
+
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
 
         # For Ollama: pass num_ctx via extra_body to prevent prompt truncation
         if self._is_ollama() and self._num_ctx:
@@ -102,6 +106,7 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Send chat request and return JSON
@@ -120,6 +125,7 @@ class LLMClient:
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
             model=model,
+            reasoning_effort=reasoning_effort,
         )
         # Clean markdown code block markers
         cleaned_response = response.strip()
@@ -142,6 +148,7 @@ class LLMClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Request JSON matching a schema and validate it without leaking raw output."""
         model = self.model_for_task(task)
@@ -160,6 +167,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 response_format=response_format,
                 model=model,
+                reasoning_effort=reasoning_effort,
             )
             parsed = self._parse_json_response(response.strip())
         except Exception as exc:
@@ -171,6 +179,7 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 model=model,
+                reasoning_effort=reasoning_effort,
             )
 
         validation_error = validate_json_schema(parsed, schema)
@@ -181,6 +190,7 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 model=model,
+                reasoning_effort=reasoning_effort,
             )
             validation_error = validate_json_schema(parsed, schema)
             if validation_error:
@@ -195,6 +205,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         model: str,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         fallback_messages = [
             {
@@ -212,6 +223,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     @staticmethod
