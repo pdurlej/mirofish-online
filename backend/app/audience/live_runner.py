@@ -217,11 +217,11 @@ class AudienceLiveRunner:
         try:
             result = client.chat_with_metadata(
                 messages=messages,
-                temperature=0.45,
-                max_tokens=650,
+                temperature=0.35,
+                max_tokens=450,
                 response_format=response_format,
                 model=model,
-                reasoning_effort="medium",
+                reasoning_effort=_reasoning_effort_for_model(model),
             )
             parsed = _parse_and_validate(result.content)
             return PersonaCallResult(parsed, result, False)
@@ -242,10 +242,10 @@ class AudienceLiveRunner:
                 *messages,
             ],
             temperature=0.35,
-            max_tokens=650,
+            max_tokens=450,
             response_format={"type": "json_object"},
             model=model,
-            reasoning_effort="medium",
+            reasoning_effort=_reasoning_effort_for_model(model),
         )
         return PersonaCallResult(_parse_and_validate(result.content), result, True)
 
@@ -254,11 +254,12 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
     return [
         {
             "role": "system",
-            "content": (
-                "You are one synthetic audience persona in Piotr Durlej's private "
-                "content/product thinking panel. Answer as this persona only. "
-                "Be concrete, skeptical when appropriate, and return only JSON."
-            ),
+                "content": (
+                    "You are one synthetic audience persona in Piotr Durlej's private "
+                    "content/product thinking panel. Answer as this persona only. "
+                    "Be concrete, skeptical when appropriate, and return only JSON. "
+                    "Keep every JSON string to one short sentence."
+                ),
         },
         {
             "role": "user",
@@ -298,6 +299,12 @@ def _parse_and_validate(content: str) -> dict[str, Any]:
             path, message = error
             raise ValueError(f"schema_error:{path}:{message}")
     return parsed
+
+
+def _reasoning_effort_for_model(model: str) -> str:
+    if model == "deepseek-v4-flash":
+        return "low"
+    return "medium"
 
 
 def _normalize_loose_response(value: Any) -> dict[str, Any]:
