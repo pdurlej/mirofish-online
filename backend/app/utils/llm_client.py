@@ -7,10 +7,21 @@ Supports Ollama num_ctx parameter to prevent prompt truncation
 import json
 import os
 import re
+import time
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 
 from ..config import Config
+
+
+@dataclass(frozen=True)
+class LLMChatResult:
+    content: str
+    model: str
+    usage: dict[str, int]
+    latency_ms: int
+    finish_reason: str | None
 
 
 class LLMClient:
@@ -89,6 +100,49 @@ class LLMClient:
         # Some models (like MiniMax M2.5) include <think>thinking content in response, need to remove
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return content
+
+    def chat_with_metadata(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        response_format: Optional[Dict] = None,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+    ) -> LLMChatResult:
+        """Send chat request and return sanitized runtime metadata."""
+        selected_model = model or self.model
+        kwargs = {
+            "model": selected_model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+        if self._is_ollama() and self._num_ctx:
+            kwargs["extra_body"] = {"options": {"num_ctx": self._num_ctx}}
+
+        started = time.monotonic()
+        response = self.client.chat.completions.create(**kwargs)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
+        usage = response.usage.model_dump() if response.usage else {}
+        return LLMChatResult(
+            content=content,
+            model=response.model or selected_model,
+            usage={
+                "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                "completion_tokens": int(usage.get("completion_tokens") or 0),
+                "total_tokens": int(usage.get("total_tokens") or 0),
+            },
+            latency_ms=latency_ms,
+            finish_reason=choice.finish_reason,
+        )
 
     def model_for_task(self, task: str) -> str:
         """Return the configured model alias for a smoke task."""

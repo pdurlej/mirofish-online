@@ -41,7 +41,7 @@
     "objections": ["Where is the audit trail and failure mode?"],
     "channel_preferences": ["blog", "podcast"],
     "skepticism": 0.69,
-    "model_hint": "glm-5.1:cloud"
+    "model_hint": "glm-5.1"
   },
   {
     "id": "skeptical-generalist-pm",
@@ -52,7 +52,7 @@
     "objections": ["I do not know what a harness is and may not care."],
     "channel_preferences": ["linkedin"],
     "skepticism": 0.83,
-    "model_hint": "qwen3.5:cloud"
+    "model_hint": "minimax-m3"
   },
   {
     "id": "founder-operator",
@@ -63,7 +63,7 @@
     "objections": ["I need leverage this week, not a research system."],
     "channel_preferences": ["linkedin", "twitter-x"],
     "skepticism": 0.64,
-    "model_hint": "kimi-k2.6:cloud"
+    "model_hint": "kimi-k2.6"
   },
   {
     "id": "podcast-regular",
@@ -96,7 +96,7 @@
     "objections": ["A blog post needs structure and evidence, not vibes."],
     "channel_preferences": ["blog"],
     "skepticism": 0.55,
-    "model_hint": "glm-5.1:cloud"
+    "model_hint": "glm-5.1"
   },
   {
     "id": "twitter-systems-nerd",
@@ -107,7 +107,7 @@
     "objections": ["Make it punchy; do not flatten the technical tension."],
     "channel_preferences": ["twitter-x"],
     "skepticism": 0.62,
-    "model_hint": "kimi-k2.6:cloud"
+    "model_hint": "kimi-k2.6"
   },
   {
     "id": "agency-product-lead",
@@ -118,7 +118,7 @@
     "objections": ["How would this change client decisions?"],
     "channel_preferences": ["linkedin", "blog"],
     "skepticism": 0.66,
-    "model_hint": "qwen3.5:cloud"
+    "model_hint": "minimax-m3"
   },
   {
     "id": "ai-safety-pragmatist",
@@ -140,7 +140,7 @@
     "objections": ["Translate this into product risk and user value."],
     "channel_preferences": ["linkedin", "podcast"],
     "skepticism": 0.79,
-    "model_hint": "qwen3.5:cloud"
+    "model_hint": "minimax-m3"
   },
   {
     "id": "cto-reader",
@@ -151,7 +151,7 @@
     "objections": ["What breaks in production?"],
     "channel_preferences": ["blog"],
     "skepticism": 0.71,
-    "model_hint": "glm-5.1:cloud"
+    "model_hint": "glm-5.1"
   },
   {
     "id": "newsletter-curator",
@@ -162,7 +162,7 @@
     "objections": ["This needs a memorable thesis."],
     "channel_preferences": ["linkedin", "blog"],
     "skepticism": 0.54,
-    "model_hint": "kimi-k2.6:cloud"
+    "model_hint": "kimi-k2.6"
   },
   {
     "id": "workflow-automation-builder",
@@ -195,7 +195,7 @@
     "objections": ["Give me examples before abstractions."],
     "channel_preferences": ["linkedin", "podcast"],
     "skepticism": 0.63,
-    "model_hint": "qwen3.5:cloud"
+    "model_hint": "minimax-m3"
   },
   {
     "id": "ai-founder",
@@ -206,7 +206,7 @@
     "objections": ["Does this create a product wedge or just content?"],
     "channel_preferences": ["twitter-x", "linkedin"],
     "skepticism": 0.6,
-    "model_hint": "kimi-k2.6:cloud"
+    "model_hint": "kimi-k2.6"
   },
   {
     "id": "market-skeptic",

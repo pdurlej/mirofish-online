@@ -35,6 +35,9 @@ class Config:
     MIROFISH_NER_MODEL = os.environ.get('MIROFISH_NER_MODEL')
     MIROFISH_REPORT_MODEL = os.environ.get('MIROFISH_REPORT_MODEL')
     MIROFISH_REPAIR_MODEL = os.environ.get('MIROFISH_REPAIR_MODEL')
+    MIROFISH_AUDIENCE_FAILURE_THRESHOLD = float(
+        os.environ.get('MIROFISH_AUDIENCE_FAILURE_THRESHOLD', '0.30')
+    )
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
