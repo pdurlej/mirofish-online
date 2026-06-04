@@ -39,10 +39,13 @@ class Config:
         os.environ.get('MIROFISH_AUDIENCE_FAILURE_THRESHOLD', '0.30')
     )
     MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS = float(
-        os.environ.get('MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS', '75')
+        os.environ.get('MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS', '45')
+    )
+    MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS = float(
+        os.environ.get('MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS', '210')
     )
     MIROFISH_AUDIENCE_MAX_WORKERS = int(
-        os.environ.get('MIROFISH_AUDIENCE_MAX_WORKERS', '5')
+        os.environ.get('MIROFISH_AUDIENCE_MAX_WORKERS', '10')
     )
 
     # Neo4j configuration
