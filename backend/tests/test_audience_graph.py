@@ -15,6 +15,7 @@ from app.audience import (
     build_fake_audience_run,
     load_default_personas,
 )
+from app.audience.live_runner import _parse_and_validate
 from app.utils.llm_client import LLMChatResult
 
 
@@ -146,6 +147,17 @@ def test_live_audience_runner_records_usage_and_receipt():
     assert payload["receipt"]["usage"]["total_tokens"] == 600
     assert payload["receipt"]["failed_persona_count"] == 0
     assert payload["receipt"]["reliability_grade"] == "green"
+
+
+def test_live_runner_normalizes_loose_provider_json():
+    parsed = _parse_and_validate(
+        '{"reaction":"Wow, this is amazing!","sentiment":"positive"}'
+    )
+
+    assert parsed["stance"] == "interested"
+    assert parsed["summary"] == "Wow, this is amazing!"
+    assert parsed["objection"]
+    assert parsed["decision_impact"]
 
 
 def test_live_audience_runner_failure_threshold_does_not_leak_topic():

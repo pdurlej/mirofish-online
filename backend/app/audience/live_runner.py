@@ -271,9 +271,81 @@ def _parse_and_validate(content: str) -> dict[str, Any]:
         parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
     error = validate_json_schema(parsed, REACTION_SCHEMA)
     if error:
-        path, message = error
-        raise ValueError(f"schema_error:{path}:{message}")
+        parsed = _normalize_loose_response(parsed)
+        error = validate_json_schema(parsed, REACTION_SCHEMA)
+        if error:
+            path, message = error
+            raise ValueError(f"schema_error:{path}:{message}")
     return parsed
+
+
+def _normalize_loose_response(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("schema_error:$:expected object")
+    text_values = [
+        str(item).strip()
+        for item in value.values()
+        if isinstance(item, str) and str(item).strip()
+    ]
+    summary = (
+        value.get("summary")
+        or value.get("reaction")
+        or value.get("opinion")
+        or value.get("answer")
+        or value.get("response")
+        or (text_values[0] if text_values else "")
+    )
+    objection = (
+        value.get("objection")
+        or value.get("concern")
+        or value.get("risk")
+        or "This needs a clearer practical consequence for the audience."
+    )
+    insight = (
+        value.get("insight")
+        or value.get("recommendation")
+        or value.get("takeaway")
+        or "Frame the idea through a concrete audience decision."
+    )
+    return {
+        "stance": _normalize_stance(str(value.get("stance") or value.get("sentiment") or "")),
+        "channel_fit": str(value.get("channel_fit") or value.get("channel") or "unknown fit"),
+        "summary": _min_text(str(summary), "The persona gave a short, loosely structured reaction."),
+        "objection": _min_text(str(objection), "This needs a clearer practical consequence."),
+        "objection_severity": _normalize_severity(str(value.get("objection_severity") or value.get("severity") or "")),
+        "insight": _min_text(str(insight), "Translate the idea into a concrete next decision."),
+        "decision_impact": _min_text(
+            str(value.get("decision_impact") or value.get("action") or ""),
+            "Use this as a weak signal and compare it with stronger persona reactions.",
+        ),
+    }
+
+
+def _normalize_stance(value: str) -> str:
+    text = value.lower()
+    if any(token in text for token in ("negative", "skeptic", "concern", "bad")):
+        return "skeptical"
+    if any(token in text for token in ("unclear", "confus", "translate")):
+        return "needs_translation"
+    if any(token in text for token in ("positive", "interested", "amazing", "good")):
+        return "interested"
+    return "curious"
+
+
+def _normalize_severity(value: str) -> str:
+    text = value.lower()
+    if "high" in text or "critical" in text:
+        return "high"
+    if "low" in text or "minor" in text:
+        return "low"
+    return "medium"
+
+
+def _min_text(value: str, fallback: str, min_length: int = 12) -> str:
+    cleaned = " ".join(value.strip().split())
+    if len(cleaned) >= min_length:
+        return cleaned
+    return fallback
 
 
 def _empty_live_receipt() -> dict[str, Any]:
