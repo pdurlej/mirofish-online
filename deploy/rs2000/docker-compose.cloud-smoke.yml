@@ -11,6 +11,15 @@ services:
     ports:
       - "127.0.0.1:${MIROFISH_UI_PORT:-13000}:3000"
       - "127.0.0.1:${MIROFISH_API_PORT:-15001}:5001"
+    labels:
+      - "traefik.enable=${MIROFISH_TRAEFIK_ENABLE:-false}"
+      - "traefik.docker.network=${PLATFORM_PROXY_NETWORK:-hp_proxy}"
+      - "traefik.http.routers.mirofish-online.rule=Host(`${MIROFISH_HOSTNAME:-mirofish.pdurlej.com}`)"
+      - "traefik.http.routers.mirofish-online.entrypoints=${MIROFISH_TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.mirofish-online.tls=true"
+      - "traefik.http.routers.mirofish-online.tls.certresolver=${MIROFISH_TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mirofish-online.middlewares=${MIROFISH_TRAEFIK_MIDDLEWARES:-tailscale-allowlist@file,security-headers@file}"
+      - "traefik.http.services.mirofish-online.loadbalancer.server.port=3000"
     restart: unless-stopped
     volumes:
       - ../../backend/uploads:/app/backend/uploads
@@ -21,6 +30,7 @@ services:
         condition: service_started
     networks:
       - mirofish-private
+      - platform-proxy
 
   neo4j:
     image: neo4j:5.18-community
@@ -62,6 +72,9 @@ services:
 networks:
   mirofish-private:
     name: mirofish_online_private
+  platform-proxy:
+    name: ${PLATFORM_PROXY_NETWORK:-hp_proxy}
+    external: true
 
 volumes:
   neo4j_data:
