@@ -167,13 +167,47 @@ def test_live_audience_runner_records_usage_and_receipt():
 
 def test_live_runner_normalizes_loose_provider_json():
     parsed = _parse_and_validate(
-        '{"reaction":"Wow, this is amazing!","sentiment":"positive"}'
+        '{"reaction":"Wow, this is amazing!","sentiment":"positive",'
+        '"concern":"Explain what changes for Scrum teams in 2026."}'
     )
 
     assert parsed["stance"] == "interested"
     assert parsed["summary"] == "Wow, this is amazing!"
-    assert parsed["objection"]
+    assert parsed["objection"] == "Explain what changes for Scrum teams in 2026."
     assert parsed["decision_impact"]
+
+
+def test_live_runner_marks_generic_fallback_objections_as_low_quality():
+    class LowQualityLLMClient:
+        def chat_with_metadata(self, **kwargs):  # noqa: ANN001
+            return LLMChatResult(
+                content='{"reaction":"Looks interesting.","sentiment":"positive"}',
+                model=kwargs["model"],
+                usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                latency_ms=10,
+                finish_reason="stop",
+            )
+
+    personas = load_default_personas()[:2]
+    runner = AudienceLiveRunner(
+        client_factory=LowQualityLLMClient,
+        failure_threshold=1.0,
+        max_workers=2,
+    )
+
+    result = runner.run(
+        AudienceRunInput(
+            topic="Czy Scrum i Kanban nadal obchodzą product managerów w 2026?",
+            run_seed="generic-fallback",
+        ),
+        personas=personas,
+    )
+
+    assert result.reactions == []
+    assert result.receipt["failed_persona_count"] == 2
+    assert result.receipt["low_quality_persona_count"] == 2
+    assert result.receipt["reliability_grade"] == "red"
+    assert {failure["error_kind"] for failure in result.failures} == {"low_quality_response"}
 
 
 def test_live_audience_runner_failure_threshold_does_not_leak_topic():
