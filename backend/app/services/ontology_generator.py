@@ -197,7 +197,7 @@ class OntologyGenerator:
         result = self.llm_client.chat_json(
             messages=messages,
             temperature=0.3,
-            max_tokens=4096
+            max_tokens=8192
         )
 
         # Validate and post-process
@@ -446,4 +446,3 @@ Based on the above content, design entity types and relationship types suitable 
         code_lines.append('}')
 
         return '\n'.join(code_lines)
-
