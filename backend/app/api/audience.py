@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from . import audience_bp
 from ..audience import (
     AudienceRunInput,
     InMemoryAudienceGraphStore,
+    Neo4jAudienceGraphStore,
     build_fake_audience_run,
     load_default_personas,
 )
 
 
 _STORE = InMemoryAudienceGraphStore()
+
+
+def _get_store():
+    storage = current_app.extensions.get("neo4j_storage")
+    if storage:
+        return Neo4jAudienceGraphStore(storage)
+    return _STORE
 
 
 @audience_bp.route("/personas", methods=["GET"])
@@ -38,11 +46,12 @@ def create_fake_run():
             title=payload.get("title"),
             run_seed=str(payload.get("run_seed", "ui")),
         )
+        store = _get_store()
         result = build_fake_audience_run(
             run_input,
-            previous_topics=_STORE.previous_topics(),
+            previous_topics=store.previous_topics(),
         )
-        counts = _STORE.write_run(result)
+        counts = store.write_run(result)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
@@ -53,7 +62,7 @@ def create_fake_run():
 
 @audience_bp.route("/runs/<run_id>", methods=["GET"])
 def get_run(run_id: str):
-    stored = _STORE.read_run(run_id)
+    stored = _get_store().read_run(run_id)
     if not stored:
         return jsonify({"success": False, "error": "Run not found"}), 404
     return jsonify({"success": True, "data": stored})

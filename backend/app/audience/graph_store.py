@@ -53,7 +53,8 @@ class Neo4jAudienceGraphStore:
                 SET t.title = $title,
                     t.channel = $channel,
                     t.topic_hash = $topic_hash,
-                    t.summary = $summary
+                    t.summary = $summary,
+                    t.updated_at = $created_at
                 MERGE (r)-[:TESTED_TOPIC]->(t)
                 """,
                 run_id=payload["run_id"],
@@ -193,6 +194,25 @@ class Neo4jAudienceGraphStore:
             )
             record = result.single()
             return dict(record) if record and record["run_id"] else None
+
+        with self._storage._driver.session() as session:  # noqa: SLF001
+            return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
+
+    def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (t:AudienceTopic)
+                RETURN t.topic_id AS id,
+                       t.summary AS summary,
+                       t.title AS title,
+                       t.channel AS channel
+                ORDER BY t.updated_at DESC
+                LIMIT $limit
+                """,
+                limit=limit,
+            )
+            return [dict(record) for record in result]
 
         with self._storage._driver.session() as session:  # noqa: SLF001
             return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
