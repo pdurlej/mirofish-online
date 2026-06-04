@@ -3,6 +3,9 @@
 This fork is intended to become Piotr's private, Tailnet-only MiroFish variant:
 cloud LLM inference, local graph storage, and no paid Zep dependency.
 
+The product North Star and smoke definition live in
+[`north-star-smoke-plan.md`](north-star-smoke-plan.md).
+
 ## Decisions
 
 - Repository name: `pdurlej/mirofish-online`.

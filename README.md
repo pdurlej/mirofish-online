@@ -16,7 +16,7 @@ This fork is optimized for Piotr's RS2000 platform:
 - Tailnet-only exposure at `mirofish.pdurlej.com`;
 - no backup or production commitment until the first real simulations prove value.
 
-See [`docs/rs2000-smoke.md`](docs/rs2000-smoke.md) for the platform-specific smoke profile. The upstream README below remains the baseline project documentation.
+See [`docs/north-star-smoke-plan.md`](docs/north-star-smoke-plan.md) for the product North Star and first useful smoke definition. See [`docs/rs2000-smoke.md`](docs/rs2000-smoke.md) for the platform-specific smoke profile. The upstream README below remains the baseline project documentation.
 
 ---
 
