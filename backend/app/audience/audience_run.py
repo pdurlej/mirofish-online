@@ -10,6 +10,7 @@ from typing import Any
 
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
+from .similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
 
 
 CHANNELS = {"podcast", "linkedin", "blog", "twitter-x", "product-idea", "unknown"}
@@ -52,6 +53,7 @@ class AudienceRunResult:
     insights: list[dict[str, Any]]
     recommendation: dict[str, Any]
     similarity_edges: list[dict[str, Any]]
+    persona_memory: list[dict[str, Any]] | None = None
     receipt: dict[str, Any] | None = None
     failures: list[dict[str, Any]] | None = None
 
@@ -66,6 +68,7 @@ class AudienceRunResult:
             "insights": self.insights,
             "recommendation": self.recommendation,
             "similarity_edges": self.similarity_edges,
+            "persona_memory": self.persona_memory or [],
             "receipt": self.receipt or _empty_receipt(),
             "failures": self.failures or [],
         }
@@ -130,7 +133,10 @@ def build_fake_audience_run(
             "before live LLM audience calls."
         ),
     }
-    similarity_edges = _similarity_edges(topic, previous_topics or [])
+    previous = previous_topics or []
+    similarity_edges = build_similarity_edges(topic, previous)
+    assign_topic_cluster(topic, similarity_edges)
+    persona_memory = build_persona_memory(persona_payloads, similarity_edges, previous)
 
     return AudienceRunResult(
         run_id=run_id,
@@ -142,6 +148,7 @@ def build_fake_audience_run(
         insights=insights,
         recommendation=recommendation,
         similarity_edges=similarity_edges,
+        persona_memory=persona_memory,
     )
 
 
@@ -251,26 +258,3 @@ def _empty_receipt() -> dict[str, Any]:
         "failure_rate": 0.0,
         "reliability_grade": "test",
     }
-
-
-def _similarity_edges(
-    topic: dict[str, Any],
-    previous_topics: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    current_terms = set(topic["summary"].lower().split())
-    edges = []
-    for previous in previous_topics:
-        previous_terms = set(str(previous.get("summary", "")).lower().split())
-        if not previous_terms:
-            continue
-        overlap = len(current_terms & previous_terms) / max(len(current_terms), 1)
-        if overlap >= 0.2:
-            edges.append(
-                {
-                    "source_topic_id": topic["id"],
-                    "target_topic_id": previous.get("id"),
-                    "relationship": "similar_to",
-                    "score": round(overlap, 3),
-                }
-            )
-    return edges

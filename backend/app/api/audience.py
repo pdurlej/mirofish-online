@@ -15,6 +15,7 @@ from ..audience import (
     build_fake_audience_run,
     load_default_personas,
 )
+from ..storage.embedding_service import EmbeddingService
 
 
 _STORE = InMemoryAudienceGraphStore()
@@ -24,6 +25,7 @@ _RUN_MANAGER = AudienceRunManager(
         call_timeout_seconds=Config.MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS,
         run_timeout_seconds=Config.MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS,
         max_workers=Config.MIROFISH_AUDIENCE_MAX_WORKERS,
+        embedding_service_factory=_audience_embedding_service,
     )
 )
 
@@ -33,6 +35,10 @@ def _get_store():
     if storage:
         return Neo4jAudienceGraphStore(storage)
     return _STORE
+
+
+def _audience_embedding_service() -> EmbeddingService:
+    return EmbeddingService(max_retries=1, timeout=5)
 
 
 def _run_input_from_payload(payload: dict) -> AudienceRunInput:
