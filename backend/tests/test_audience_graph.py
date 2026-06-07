@@ -289,6 +289,33 @@ def test_control_topics_do_not_join_ai_cluster():
         ) == []
 
 
+def test_similarity_ignores_batch_boilerplate_and_broad_pm_overlap_for_controls():
+    ai_previous = {
+        "id": "topic-ai-builder",
+        "topic_hash": "ai-builder",
+        "title": "Repair E2E AI workflow builder",
+        "summary": "PM w Polsce uzywa AI do szybkiego prototypu zamiast kolejnego briefu.",
+        "channel": "linkedin",
+        "cluster_id": "cluster-ai",
+        "cluster_label": "AI workflow",
+    }
+    control = {
+        "id": "topic-eudi-control",
+        "topic_hash": "eudi-control",
+        "title": "Repair E2E EUDI wallet onboarding",
+        "summary": "EUDI Wallet i cyfrowa tozsamosc jako onboarding: co musi zrozumiec PM.",
+        "channel": "product-idea",
+    }
+
+    edges = build_similarity_edges(
+        control,
+        [ai_previous],
+        embedding_provider=SameEmbeddingProvider(),
+    )
+
+    assert edges == []
+
+
 def test_embedding_failure_falls_back_to_lexical_similarity():
     previous = {
         "id": "topic-ai-harnesses",

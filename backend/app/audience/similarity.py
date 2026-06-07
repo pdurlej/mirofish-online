@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 LEXICAL_THRESHOLD = 0.20
 SEMANTIC_THRESHOLD = 0.68
-SEMANTIC_ONLY_LEXICAL_FLOOR = 0.08
+SEMANTIC_ONLY_LEXICAL_FLOOR = 0.30
 MAX_SIMILARITY_EDGES = 5
 
 
@@ -27,11 +27,13 @@ STOPWORDS = {
     "and",
     "as",
     "be",
+    "batch",
     "bo",
     "by",
     "czy",
     "dla",
     "do",
+    "e2e",
     "go",
     "i",
     "in",
@@ -48,8 +50,11 @@ STOPWORDS = {
     "po",
     "pod",
     "przez",
+    "repair",
+    "run",
     "się",
     "sie",
+    "test",
     "the",
     "to",
     "w",
@@ -59,6 +64,7 @@ STOPWORDS = {
     "ze",
     "że",
 }
+BROAD_CONCEPTS = {"concept_pm"}
 
 CONCEPT_PATTERNS = {
     "concept_ai": (
@@ -160,7 +166,7 @@ def build_similarity_edges(
             semantic_score,
             semantic_threshold,
         )
-        score = max(lexical_score, semantic_score or 0.0)
+        score = max(lexical_score, semantic_score or 0.0) if semantic_match else lexical_score
         if lexical_score < lexical_threshold and not semantic_match:
             continue
         method = _similarity_method(lexical_score, semantic_match, lexical_threshold)
@@ -275,7 +281,7 @@ def _weighted_terms(topic: dict[str, Any]) -> dict[str, int]:
         terms[token] = terms.get(token, 0) + 1
     for token in _tokens(str(topic.get("title") or "")):
         terms[token] = terms.get(token, 0) + 2
-    for token in _concept_tokens(topic_similarity_text(topic)):
+    for token in _specific_concept_tokens(topic_similarity_text(topic)):
         terms[token] = terms.get(token, 0) + 3
     return terms
 
@@ -350,9 +356,13 @@ def _semantic_match_allowed(
         return False
     if lexical_score >= SEMANTIC_ONLY_LEXICAL_FLOOR:
         return True
-    current_concepts = set(_concept_tokens(topic_similarity_text(current)))
-    previous_concepts = set(_concept_tokens(topic_similarity_text(previous)))
+    current_concepts = set(_specific_concept_tokens(topic_similarity_text(current)))
+    previous_concepts = set(_specific_concept_tokens(topic_similarity_text(previous)))
     return bool(current_concepts & previous_concepts)
+
+
+def _specific_concept_tokens(text: str) -> list[str]:
+    return [concept for concept in _concept_tokens(text) if concept not in BROAD_CONCEPTS]
 
 
 def _normalized_title(topic: dict[str, Any]) -> str:
