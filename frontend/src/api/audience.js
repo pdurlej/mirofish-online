@@ -19,3 +19,12 @@ export const getAudienceRun = (runId) => {
 export const listAudienceRuns = (limit = 25) => {
   return service.get(`/api/audience/runs?limit=${limit}`)
 }
+
+export const getAudienceGraph = ({ limit = 120, minScore = 0.35, includePersonas = false } = {}) => {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    min_score: String(minScore),
+    include_personas: includePersonas ? 'true' : 'false'
+  })
+  return service.get(`/api/audience/graph?${params.toString()}`)
+}

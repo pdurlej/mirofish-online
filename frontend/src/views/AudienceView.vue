@@ -1,7 +1,10 @@
 <template>
   <div class="audience-page">
     <nav class="audience-nav">
-      <button class="ghost-button" @click="router.push('/')">← Home</button>
+      <div class="nav-actions">
+        <button class="ghost-button" @click="router.push('/')">← Home</button>
+        <button class="ghost-button" @click="router.push('/audience/graph')">Graph</button>
+      </div>
       <span>Private Audience Graph</span>
     </nav>
 
@@ -185,7 +188,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   createFakeAudienceRun,
   createLiveAudienceRun,
@@ -195,6 +198,7 @@ import {
 } from '../api/audience'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const error = ref('')
 const result = ref(null)
@@ -229,6 +233,9 @@ const buttonLabel = computed(() => {
 
 onMounted(async () => {
   await Promise.all([loadPersonas(), loadHistory()])
+  if (route.query.run) {
+    await loadRun(String(route.query.run))
+  }
 })
 
 const loadPersonas = async () => {
@@ -349,6 +356,12 @@ const trimText = (text, limit) => {
   justify-content: space-between;
   align-items: center;
   font-family: 'JetBrains Mono', monospace;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .audience-shell {
