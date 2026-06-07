@@ -517,11 +517,14 @@ def _parse_and_validate(content: str) -> dict[str, Any]:
     cleaned = re.sub(r"\n?```\s*$", "", cleaned).strip()
     try:
         parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         start = cleaned.find("{")
         if start < 0:
-            raise ValueError("invalid_json")
-        parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+            raise ValueError("invalid_json") from exc
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+        except json.JSONDecodeError as raw_exc:
+            raise ValueError("invalid_json") from raw_exc
     error = validate_json_schema(parsed, REACTION_SCHEMA)
     if error:
         parsed = _normalize_loose_response(parsed)
@@ -622,6 +625,9 @@ def _empty_live_receipt() -> dict[str, Any]:
         "latency_ms": 0,
         "schema_fallback_count": 0,
         "schema_fallback_attempt_count": 0,
+        "persona_repair_retry_count": 0,
+        "persona_repair_retry_success_count": 0,
+        "persona_repair_retry_failure_count": 0,
         "high_quality_retry_count": 0,
         "high_quality_retry_success_count": 0,
         "high_quality_retry_failure_count": 0,
@@ -641,6 +647,11 @@ def _record_attempts(receipt: dict[str, Any], attempts: tuple[PersonaAttempt, ..
     for attempt in attempts:
         if attempt.schema_fallback:
             receipt["schema_fallback_attempt_count"] += 1
+            receipt["persona_repair_retry_count"] += 1
+            if attempt.error_kind:
+                receipt["persona_repair_retry_failure_count"] += 1
+            else:
+                receipt["persona_repair_retry_success_count"] += 1
         if attempt.metadata:
             _record_usage(receipt, attempt.metadata, failed=attempt.error_kind is not None)
         else:
@@ -873,6 +884,8 @@ def _looks_like_schema_retry(exc: Exception) -> bool:
 
 
 def _sanitized_error_kind(exc: Exception) -> str:
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_json"
     if isinstance(exc, ValueError) and str(exc).startswith("schema_error"):
         return "schema_validation_failed"
     if isinstance(exc, ValueError) and str(exc) == "invalid_json":

@@ -289,6 +289,33 @@ def test_control_topics_do_not_join_ai_cluster():
         ) == []
 
 
+def test_similarity_ignores_batch_boilerplate_and_broad_pm_overlap_for_controls():
+    ai_previous = {
+        "id": "topic-ai-builder",
+        "topic_hash": "ai-builder",
+        "title": "Repair E2E AI workflow builder 20260607155649",
+        "summary": "PM w Polsce uzywa AI do szybkiego prototypu zamiast kolejnego briefu.",
+        "channel": "linkedin",
+        "cluster_id": "cluster-ai",
+        "cluster_label": "AI workflow",
+    }
+    control = {
+        "id": "topic-eudi-control",
+        "topic_hash": "eudi-control",
+        "title": "Repair E2E EUDI wallet onboarding 20260607155649",
+        "summary": "EUDI Wallet i cyfrowa tozsamosc jako onboarding: co musi zrozumiec PM.",
+        "channel": "product-idea",
+    }
+
+    edges = build_similarity_edges(
+        control,
+        [ai_previous],
+        embedding_provider=SameEmbeddingProvider(),
+    )
+
+    assert edges == []
+
+
 def test_embedding_failure_falls_back_to_lexical_similarity():
     previous = {
         "id": "topic-ai-harnesses",
@@ -455,8 +482,57 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
     assert result.receipt["models"]["deepseek-v4-pro"]["calls"] == 1
     assert result.receipt["schema_fallback_attempt_count"] == 1
     assert result.receipt["schema_fallback_count"] == 0
+    assert result.receipt["persona_repair_retry_count"] == 1
+    assert result.receipt["persona_repair_retry_failure_count"] == 1
     assert result.receipt["high_quality_retry_count"] == 1
     assert result.receipt["high_quality_retry_success_count"] == 1
+    assert result.receipt["failed_persona_count"] == 0
+
+
+def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
+    class MalformedJsonThenRepairClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_with_metadata(self, **kwargs):  # noqa: ANN001
+            self.calls += 1
+            if self.calls == 1:
+                return LLMChatResult(
+                    content="{not valid json",
+                    model=kwargs["model"],
+                    usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                    latency_ms=10,
+                    finish_reason="stop",
+                )
+            return LLMChatResult(
+                content=VALID_REACTION_JSON,
+                model=kwargs["model"],
+                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                latency_ms=20,
+                finish_reason="stop",
+            )
+
+    runner = AudienceLiveRunner(
+        client_factory=MalformedJsonThenRepairClient,
+        max_workers=1,
+    )
+
+    result = runner.run(
+        AudienceRunInput(topic="Czy Agile ma jeszcze sens w 2026?", run_seed="repair-invalid"),
+        personas=load_default_personas()[:1],
+    )
+
+    assert len(result.reactions) == 1
+    assert result.reactions[0]["model"] == "deepseek-v4-flash"
+    assert result.receipt["usage"]["total_tokens"] == 33
+    assert result.receipt["models"]["deepseek-v4-flash"]["calls"] == 2
+    assert result.receipt["models"]["deepseek-v4-flash"]["failures"] == 1
+    assert result.receipt["schema_fallback_attempt_count"] == 1
+    assert result.receipt["schema_fallback_count"] == 1
+    assert result.receipt["persona_repair_retry_count"] == 1
+    assert result.receipt["persona_repair_retry_success_count"] == 1
+    assert result.receipt["persona_repair_retry_failure_count"] == 0
+    assert result.receipt["high_quality_retry_count"] == 0
     assert result.receipt["failed_persona_count"] == 0
 
 
