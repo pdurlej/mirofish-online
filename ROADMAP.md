@@ -1,86 +1,84 @@
-# MiroFish-Offline Roadmap
+# MiroFish Online Roadmap
 
-## Current State (v0.2.0)
+MiroFish Online is currently optimized for one operator workflow:
 
-Fully local fork running on Neo4j CE + Ollama. All Zep Cloud dependencies removed. Core pipeline works: upload text → build knowledge graph → entity extraction → simulation → report generation.
+> Test an idea against a stable synthetic audience, remember the result in a
+> graph, and use that memory to decide the next move.
 
----
+This roadmap is intentionally narrower than the upstream MiroFish-Offline
+roadmap. Full simulation remains interesting, but the active product path is the
+private audience graph.
+
+## Current State
+
+- `/audience` live and fake audience runs.
+- 20 stable audience personas.
+- Structured reactions, objections, insights, recommendation, and receipts.
+- Token usage, model attribution, latency, failure, and reliability metadata.
+- Neo4j persistence for runs, topics, personas, reactions, objections, insights,
+  recommendations, similarity edges, and topic clusters.
+- Hybrid lexical/semantic similarity between topics.
+- Reviewer memory across related topics.
+- `/audience/graph` global graph view with clusters, filters, search, and run
+  drill-down.
+- RS2000 app-only deployment and smoke profile.
 
 ## Near Term
 
-### v0.3.0 — Stability & Python Compatibility
-- [ ] Fix `camel-oasis` / `camel-ai` compatibility with Python 3.12+ (currently requires <3.12)
-- [ ] Add Docker Compose GPU auto-detection (fallback to CPU-only Ollama)
-- [ ] Connection resilience: auto-reconnect to Neo4j on transient failures
-- [ ] Add `/api/status` endpoint showing Neo4j connection state, Ollama model availability, and disk usage
-- [ ] Structured logging with JSON output option
+### Graph Usefulness
 
-### v0.4.0 — Search & Retrieval Improvements
-- [ ] Tune hybrid search weights (currently 0.7 vector / 0.3 BM25) — make configurable per graph
-- [ ] Add graph-aware reranking: boost results connected to the query entity
-- [ ] Support multiple embedding models (e.g., mxbai-embed-large, bge-m3 for multilingual)
-- [ ] Implement edge-weight decay for temporal relevance in simulations
+- [ ] Improve global graph visual hierarchy for dense production data.
+- [ ] Highlight selected node neighborhoods and dim unrelated branches.
+- [ ] Add useful hover previews for topics and edges.
+- [ ] Improve cluster labels and branch naming.
+- [ ] Add "why connected" explanations for the strongest similarity edges.
 
----
+### Audience Quality
+
+- [ ] Detect repeated or overly generic objections across personas.
+- [ ] Mark mass repetition as lower reliability, even when schema validation
+      passes.
+- [ ] Tune Polish prompts for Polish product/content topics.
+- [ ] Add deliberate high-quality retry for low-quality persona responses.
+- [ ] Keep retry cost visible in receipts.
+
+### Operator Workflow
+
+- [ ] Make next-action recommendations more concrete for podcast vs LinkedIn vs
+      blog vs product-research use.
+- [ ] Add a compact "what changed my mind" section to run reports.
+- [ ] Improve history navigation between graph, run detail, and related topics.
+- [ ] Add saved-for-later / revisit markers for topics.
 
 ## Mid Term
 
-### v0.5.0 — Multi-Model Support
-- [ ] Model router: assign different Ollama models to different tasks (fast model for NER, large model for reports)
-- [ ] Support vLLM and llama.cpp as alternative backends alongside Ollama
-- [ ] Add model benchmarking tool: compare NER/RE quality across models on the same seed text
-- [ ] Quantization-aware config: auto-select context window based on available VRAM
+### Graph Memory
 
-### v0.6.0 — Enhanced Simulation
-- [ ] Real-time simulation dashboard with WebSocket updates
-- [ ] Agent memory persistence across simulation rounds (currently in-memory)
-- [ ] Custom agent archetypes: define personality templates beyond OASIS defaults
-- [ ] Multi-language simulation support (agents can interact in different languages)
-- [ ] Export simulation transcripts as structured JSON for external analysis
+- [ ] Track topic branches over time, not just pairwise similarity.
+- [ ] Show overlap with previous AI, product discovery, pricing, and governance
+      themes.
+- [ ] Let the graph explain when a new idea is fresh, derivative, or a better
+      angle on an older topic.
+- [ ] Add non-destructive export of sanitized graph snapshots.
 
-### v0.7.0 — Graph Intelligence
-- [ ] Community detection (Louvain/Leiden) to auto-identify entity clusters
-- [ ] Graph visualization improvements: force-directed layout, filtering by entity type
-- [ ] Temporal graph: track how entity relationships evolve across simulation rounds
-- [ ] Graph diff: compare two simulation runs side-by-side
+### Model Reliability
 
----
+- [ ] Compare DeepSeek Flash, DeepSeek Pro, GLM, Kimi, Minimax, and Qwen on
+      concrete usefulness, not only schema compliance.
+- [ ] Add per-model quality summaries across runs.
+- [ ] Add red-team reruns for high-stakes or ambiguous topics.
 
-## Long Term
+## Deferred
 
-### v1.0.0 — Production Ready
-- [ ] Authentication & multi-user support
-- [ ] Graph versioning: snapshot and restore graph states
-- [ ] Plugin system for custom NER extractors, search strategies, and report templates
-- [ ] Comprehensive test suite (unit + integration + E2E)
-- [ ] Performance benchmarks: document throughput (texts/min) and latency per hardware tier
-- [ ] Helm chart for Kubernetes deployment
+- Public multi-user SaaS.
+- Generic market research platform.
+- Postgres adapter.
+- Backup commitment before repeated value is proven.
+- OASIS/CAMEL as the primary runtime path.
+- Full transcript storage for private prompts or provider outputs.
 
-### Beyond v1.0
-- [ ] Federation: connect multiple MiroFish instances to share entity knowledge
-- [ ] Fine-tuned local models specifically trained for NER/RE on social simulation data
-- [ ] Voice-driven interaction: talk to simulation agents via local Whisper + TTS
-- [ ] Mobile companion app for monitoring running simulations
+## Long-Term Bet
 
----
-
-## Hardware Tiers
-
-| Tier | RAM | GPU VRAM | Recommended Model | Expected Performance |
-|------|-----|----------|-------------------|---------------------|
-| Minimal | 8 GB | — (CPU only) | qwen2.5:3b | Slow, basic NER quality |
-| Light | 16 GB | 6-8 GB | qwen2.5:7b | Usable for small graphs |
-| Standard | 32 GB | 12-16 GB | qwen2.5:14b | Good for most use cases |
-| Power | 64 GB | 24+ GB | qwen2.5:32b | Full quality, fast |
-
----
-
-## Contributing
-
-This project is AGPL-3.0 licensed. Contributions welcome — especially around:
-- Python 3.12+ compatibility for CAMEL-AI / OASIS
-- Additional embedding model support
-- Simulation quality improvements
-- Documentation and tutorials in English
-
-See [GitHub Issues](https://github.com/nikmcfly/MiroFish-Offline/issues) for current tasks.
+MiroFish should become a private thinking map for Piotr's product and content
+work: a place where repeated topic tests build memory, show branches, reveal
+audience fatigue, and make the next move clearer.
