@@ -1,13 +1,13 @@
 # MiroFish Online Roadmap
 
-MiroFish Online is currently optimized for one operator workflow:
+MiroFish Online is currently optimized for one repeatable workflow:
 
 > Test an idea against a stable synthetic audience, remember the result in a
 > graph, and use that memory to decide the next move.
 
 This roadmap is intentionally narrower than the upstream MiroFish-Offline
 roadmap. Full simulation remains interesting, but the active product path is the
-private audience graph.
+synthetic audience graph.
 
 ## Current State
 
@@ -21,7 +21,7 @@ private audience graph.
 - Reviewer memory across related topics.
 - `/audience/graph` global graph view with clusters, filters, search, and run
   drill-down.
-- RS2000 app-only deployment and smoke profile.
+- Docker Compose deployment profile and smoke checks.
 
 ## Near Term
 
@@ -75,10 +75,10 @@ private audience graph.
 - Postgres adapter.
 - Backup commitment before repeated value is proven.
 - OASIS/CAMEL as the primary runtime path.
-- Full transcript storage for private prompts or provider outputs.
+- Full transcript storage for prompts or provider outputs.
 
 ## Long-Term Bet
 
-MiroFish should become a private thinking map for Piotr's product and content
+MiroFish should become a reusable thinking map for content, product, and startup
 work: a place where repeated topic tests build memory, show branches, reveal
 audience fatigue, and make the next move clearer.
