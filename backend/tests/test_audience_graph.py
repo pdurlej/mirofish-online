@@ -455,8 +455,57 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
     assert result.receipt["models"]["deepseek-v4-pro"]["calls"] == 1
     assert result.receipt["schema_fallback_attempt_count"] == 1
     assert result.receipt["schema_fallback_count"] == 0
+    assert result.receipt["persona_repair_retry_count"] == 1
+    assert result.receipt["persona_repair_retry_failure_count"] == 1
     assert result.receipt["high_quality_retry_count"] == 1
     assert result.receipt["high_quality_retry_success_count"] == 1
+    assert result.receipt["failed_persona_count"] == 0
+
+
+def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
+    class MalformedJsonThenRepairClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_with_metadata(self, **kwargs):  # noqa: ANN001
+            self.calls += 1
+            if self.calls == 1:
+                return LLMChatResult(
+                    content="{not valid json",
+                    model=kwargs["model"],
+                    usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                    latency_ms=10,
+                    finish_reason="stop",
+                )
+            return LLMChatResult(
+                content=VALID_REACTION_JSON,
+                model=kwargs["model"],
+                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                latency_ms=20,
+                finish_reason="stop",
+            )
+
+    runner = AudienceLiveRunner(
+        client_factory=MalformedJsonThenRepairClient,
+        max_workers=1,
+    )
+
+    result = runner.run(
+        AudienceRunInput(topic="Czy Agile ma jeszcze sens w 2026?", run_seed="repair-invalid"),
+        personas=load_default_personas()[:1],
+    )
+
+    assert len(result.reactions) == 1
+    assert result.reactions[0]["model"] == "deepseek-v4-flash"
+    assert result.receipt["usage"]["total_tokens"] == 33
+    assert result.receipt["models"]["deepseek-v4-flash"]["calls"] == 2
+    assert result.receipt["models"]["deepseek-v4-flash"]["failures"] == 1
+    assert result.receipt["schema_fallback_attempt_count"] == 1
+    assert result.receipt["schema_fallback_count"] == 1
+    assert result.receipt["persona_repair_retry_count"] == 1
+    assert result.receipt["persona_repair_retry_success_count"] == 1
+    assert result.receipt["persona_repair_retry_failure_count"] == 0
+    assert result.receipt["high_quality_retry_count"] == 0
     assert result.receipt["failed_persona_count"] == 0
 
 
