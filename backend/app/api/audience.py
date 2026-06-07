@@ -24,7 +24,7 @@ _RUN_MANAGER = AudienceRunManager(
         failure_threshold=Config.MIROFISH_AUDIENCE_FAILURE_THRESHOLD,
         call_timeout_seconds=Config.MIROFISH_AUDIENCE_CALL_TIMEOUT_SECONDS,
         run_timeout_seconds=Config.MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS,
-        max_workers=Config.MIROFISH_AUDIENCE_MAX_WORKERS,
+        max_workers=min(Config.MIROFISH_AUDIENCE_MAX_WORKERS, 6),
         embedding_service_factory=_audience_embedding_service,
     )
 )

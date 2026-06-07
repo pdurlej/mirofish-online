@@ -154,6 +154,25 @@ def test_similarity_blocks_self_loop_for_same_topic_hash():
     assert edges == []
 
 
+def test_similarity_blocks_duplicate_title_even_with_new_hash():
+    current = {
+        "id": "topic-current",
+        "topic_hash": "current-hash",
+        "title": "Evals i ROI dla funkcji AI",
+        "summary": "Jak udowodnic ROI funkcji AI w produkcie.",
+        "channel": "podcast",
+    }
+    previous = current | {
+        "id": "topic-previous",
+        "topic_hash": "previous-hash",
+        "summary": "Wczesniejszy run o tym samym tytule i podobnym temacie.",
+    }
+
+    edges = build_similarity_edges(current, [previous])
+
+    assert edges == []
+
+
 class SemanticEmbeddingProvider:
     def embed_batch(self, texts, batch_size=32):  # noqa: ANN001, ARG002
         return [self._vector(text) for text in texts]
@@ -172,6 +191,11 @@ class SemanticEmbeddingProvider:
 class RaisingEmbeddingProvider:
     def embed_batch(self, texts, batch_size=32):  # noqa: ANN001, ARG002
         raise EmbeddingError("embedding endpoint unavailable")
+
+
+class SameEmbeddingProvider:
+    def embed_batch(self, texts, batch_size=32):  # noqa: ANN001, ARG002
+        return [[1.0, 0.0, 0.0] for _text in texts]
 
 
 def test_semantic_similarity_links_ai_evals_to_ai_workflow():
@@ -202,6 +226,32 @@ def test_semantic_similarity_links_ai_evals_to_ai_workflow():
     assert edges[0]["target_title"] == previous["title"]
     assert edges[0]["semantic_score"] >= 0.68
     assert edges[0]["method"] in {"semantic", "hybrid"}
+
+
+def test_semantic_similarity_requires_lexical_or_concept_overlap():
+    current = {
+        "id": "topic-pricing",
+        "topic_hash": "pricing",
+        "title": "Pricing polskiego SaaS",
+        "summary": "Packaging, revenue i monetyzacja planow enterprise.",
+        "channel": "linkedin",
+    }
+    previous = {
+        "id": "topic-eudi",
+        "topic_hash": "eudi",
+        "title": "EUDI Wallet i mObywatel",
+        "summary": "Onboarding, KYC i cyfrowa tozsamosc w produkcie.",
+        "channel": "product-idea",
+    }
+
+    edges = build_similarity_edges(
+        current,
+        [previous],
+        embedding_provider=SameEmbeddingProvider(),
+        semantic_threshold=0.99,
+    )
+
+    assert edges == []
 
 
 def test_control_topics_do_not_join_ai_cluster():
