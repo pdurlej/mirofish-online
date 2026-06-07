@@ -72,6 +72,29 @@ def list_runs():
     return jsonify({"success": True, "data": data, "count": len(data)})
 
 
+@audience_bp.route("/graph", methods=["GET"])
+def get_graph_snapshot():
+    try:
+        limit = min(max(int(request.args.get("limit", 120)), 1), 300)
+    except ValueError:
+        limit = 120
+    try:
+        min_score = min(max(float(request.args.get("min_score", 0.35)), 0.0), 1.0)
+    except ValueError:
+        min_score = 0.35
+    include_personas = str(request.args.get("include_personas", "false")).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    data = _get_store().graph_snapshot(
+        limit=limit,
+        min_score=min_score,
+        include_personas=include_personas,
+    )
+    return jsonify({"success": True, "data": data})
+
+
 @audience_bp.route("/runs", methods=["POST"])
 def create_live_run():
     payload = request.get_json(silent=True) or {}

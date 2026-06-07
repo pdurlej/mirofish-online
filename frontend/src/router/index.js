@@ -6,6 +6,7 @@ import SimulationRunView from '../views/SimulationRunView.vue'
 import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
 import AudienceView from '../views/AudienceView.vue'
+import AudienceGraphView from '../views/AudienceGraphView.vue'
 
 const routes = [
   {
@@ -47,6 +48,11 @@ const routes = [
     path: '/audience',
     name: 'Audience',
     component: AudienceView
+  },
+  {
+    path: '/audience/graph',
+    name: 'AudienceGraph',
+    component: AudienceGraphView
   }
 ]
 

@@ -6,7 +6,13 @@ import time
 from io import StringIO
 
 from app import create_app
-from app.audience import AudienceRunFailed, AudienceRunManager, build_fake_audience_run, live_run_id
+from app.audience import (
+    AudienceRunFailed,
+    AudienceRunManager,
+    InMemoryAudienceGraphStore,
+    build_fake_audience_run,
+    live_run_id,
+)
 
 
 def test_audience_personas_endpoint_returns_20_active_personas():
@@ -82,6 +88,81 @@ def test_second_fake_run_can_report_similarity_edge():
     history = client.get("/api/audience/runs?limit=5").get_json()["data"]
     assert history[0]["similar_topics"][0]["title"]
     assert history[0]["cluster_label"]
+
+
+def test_audience_graph_endpoint_returns_sanitized_topic_cluster_snapshot(monkeypatch):
+    from app.api import audience as audience_api
+
+    monkeypatch.setattr(audience_api, "_STORE", InMemoryAudienceGraphStore())
+    app = create_app()
+    client = app.test_client()
+
+    client.post(
+        "/api/audience/runs/fake",
+        json={
+            "topic": "SECRET_PRIVATE_TOPIC AI harnesses help PMs make reliable decisions",
+            "title": "AI harnesses for PMs",
+            "channel": "linkedin",
+            "run_seed": "graph-one",
+        },
+    )
+    client.post(
+        "/api/audience/runs/fake",
+        json={
+            "topic": "Reliable AI decisions need PMs to use harnesses and evals",
+            "title": "Reliable AI decisions",
+            "channel": "blog",
+            "run_seed": "graph-two",
+        },
+    )
+
+    response = client.get("/api/audience/graph?limit=20&min_score=0.2")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    data = payload["data"]
+    assert payload["success"] is True
+    assert data["stats"]["topic_count"] == 2
+    assert data["stats"]["cluster_count"] >= 1
+    assert data["stats"]["similarity_edge_count"] >= 1
+    assert any(node["type"] == "topic" for node in data["nodes"])
+    assert any(node["type"] == "cluster" for node in data["nodes"])
+    assert any(edge["type"] == "IN_CLUSTER" for edge in data["edges"])
+    assert any(edge["type"] == "SIMILAR_TO" for edge in data["edges"])
+    assert "SECRET_PRIVATE_TOPIC" not in json.dumps(data)
+
+
+def test_audience_graph_endpoint_filters_edges_and_limits_topics(monkeypatch):
+    from app.api import audience as audience_api
+
+    monkeypatch.setattr(audience_api, "_STORE", InMemoryAudienceGraphStore())
+    app = create_app()
+    client = app.test_client()
+
+    client.post(
+        "/api/audience/runs/fake",
+        json={
+            "topic": "AI harnesses help PMs make reliable decisions",
+            "title": "AI harnesses for PMs",
+            "run_seed": "limit-one",
+        },
+    )
+    client.post(
+        "/api/audience/runs/fake",
+        json={
+            "topic": "Reliable AI decisions need PMs to use harnesses and evals",
+            "title": "Reliable AI decisions",
+            "run_seed": "limit-two",
+        },
+    )
+
+    limited = client.get("/api/audience/graph?limit=1&min_score=0.2").get_json()["data"]
+    strict = client.get("/api/audience/graph?limit=20&min_score=0.99").get_json()["data"]
+
+    assert limited["stats"]["topic_count"] == 1
+    assert limited["stats"]["similarity_edge_count"] == 0
+    assert strict["stats"]["topic_count"] == 2
+    assert strict["stats"]["similarity_edge_count"] == 0
 
 
 class FakeRunner:

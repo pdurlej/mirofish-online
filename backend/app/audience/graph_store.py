@@ -21,6 +21,15 @@ class AudienceGraphStore(Protocol):
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         """Return recent audience runs for history UI."""
 
+    def graph_snapshot(
+        self,
+        *,
+        limit: int = 120,
+        min_score: float = 0.35,
+        include_personas: bool = False,
+    ) -> dict[str, Any]:
+        """Return a sanitized topic/cluster graph snapshot for UI rendering."""
+
 
 class InMemoryAudienceGraphStore:
     def __init__(self) -> None:
@@ -41,6 +50,20 @@ class InMemoryAudienceGraphStore:
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
         return [_history_summary(payload) for payload in reversed(values)]
+
+    def graph_snapshot(
+        self,
+        *,
+        limit: int = 120,
+        min_score: float = 0.35,
+        include_personas: bool = False,
+    ) -> dict[str, Any]:
+        values = list(self._runs.values())[-limit:]
+        return _graph_snapshot_from_payloads(
+            list(reversed(values)),
+            min_score=min_score,
+            include_personas=include_personas,
+        )
 
 
 class Neo4jAudienceGraphStore:
@@ -340,6 +363,73 @@ class Neo4jAudienceGraphStore:
         with self._storage._driver.session() as session:  # noqa: SLF001
             return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
 
+    def graph_snapshot(
+        self,
+        *,
+        limit: int = 120,
+        min_score: float = 0.35,
+        include_personas: bool = False,
+    ) -> dict[str, Any]:
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t:AudienceTopic)
+                OPTIONAL MATCH (r)-[:HAS_RECOMMENDATION]->(rec:AudienceRecommendation)
+                OPTIONAL MATCH (t)-[:IN_CLUSTER]->(cluster:AudienceTopicCluster)
+                WITH r, t, rec, head(collect(cluster)) AS cluster
+                ORDER BY coalesce(t.updated_at, r.created_at) DESC
+                LIMIT $limit
+                WITH collect({
+                    run_id: r.run_id,
+                    created_at: r.created_at,
+                    total_tokens: r.total_tokens,
+                    failure_rate: r.failure_rate,
+                    reliability_grade: r.reliability_grade,
+                    topic_id: t.topic_id,
+                    title: t.title,
+                    channel: t.channel,
+                    summary: t.summary,
+                    cluster_id: coalesce(t.cluster_id, cluster.cluster_id),
+                    cluster_label: coalesce(t.cluster_label, cluster.label),
+                    decision: rec.decision,
+                    best_channel: rec.best_channel,
+                    next_action: rec.next_action
+                }) AS topic_rows
+                WITH topic_rows, [row IN topic_rows | row.topic_id] AS topic_ids
+                UNWIND topic_rows AS row
+                OPTIONAL MATCH (src:AudienceTopic {topic_id: row.topic_id})-[sim:SIMILAR_TO]->(target:AudienceTopic)
+                WHERE sim.score >= $min_score AND target.topic_id IN topic_ids
+                WITH topic_rows, collect(DISTINCT {
+                    source_topic_id: row.topic_id,
+                    target_topic_id: target.topic_id,
+                    target_title: target.title,
+                    score: sim.score,
+                    method: sim.method,
+                    lexical_score: sim.lexical_score,
+                    semantic_score: sim.semantic_score
+                }) AS similarity_edges
+                RETURN topic_rows AS topic_rows,
+                       [edge IN similarity_edges WHERE edge.target_topic_id IS NOT NULL] AS similarity_edges
+                """,
+                limit=limit,
+                min_score=min_score,
+            )
+            record = result.single()
+            if not record:
+                return _graph_snapshot_from_rows([], [], include_personas=include_personas)
+            return _graph_snapshot_from_rows(
+                list(record["topic_rows"] or []),
+                list(record["similarity_edges"] or []),
+                include_personas=include_personas,
+            )
+
+        with self._storage._driver.session() as session:  # noqa: SLF001
+            snapshot = self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
+        snapshot["filters"]["limit"] = limit
+        snapshot["filters"]["min_score"] = min_score
+        snapshot["filters"]["include_personas"] = include_personas
+        return snapshot
+
 
 def _write_counts(payload: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -352,6 +442,214 @@ def _write_counts(payload: dict[str, Any]) -> dict[str, Any]:
         "recommendations": 1,
         "similarity_edges": len(payload["similarity_edges"]),
     }
+
+
+def _graph_snapshot_from_payloads(
+    payloads: list[dict[str, Any]],
+    *,
+    min_score: float,
+    include_personas: bool,
+) -> dict[str, Any]:
+    topic_rows: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    for payload in payloads:
+        topic = payload.get("topic") or {}
+        topic_id = topic.get("id")
+        if not topic_id:
+            continue
+        selected_ids.add(topic_id)
+        receipt = payload.get("receipt") or {}
+        recommendation = payload.get("recommendation") or {}
+        topic_rows.append(
+            {
+                "run_id": payload.get("run_id"),
+                "created_at": payload.get("created_at"),
+                "total_tokens": receipt.get("usage", {}).get("total_tokens", 0),
+                "failure_rate": receipt.get("failure_rate", 0.0),
+                "reliability_grade": receipt.get("reliability_grade", "unknown"),
+                "topic_id": topic_id,
+                "title": topic.get("title"),
+                "channel": topic.get("channel"),
+                "cluster_id": topic.get("cluster_id"),
+                "cluster_label": topic.get("cluster_label"),
+                "decision": recommendation.get("decision"),
+                "best_channel": recommendation.get("best_channel"),
+                "next_action": recommendation.get("next_action"),
+            }
+        )
+
+    similarity_edges: list[dict[str, Any]] = []
+    for payload in payloads:
+        for edge in payload.get("similarity_edges", []):
+            score = _safe_float(edge.get("score"))
+            if score < min_score:
+                continue
+            source_id = edge.get("source_topic_id")
+            target_id = edge.get("target_topic_id")
+            if source_id in selected_ids and target_id in selected_ids:
+                similarity_edges.append(edge)
+
+    snapshot = _graph_snapshot_from_rows(
+        topic_rows,
+        similarity_edges,
+        include_personas=include_personas,
+    )
+    snapshot["filters"]["limit"] = len(topic_rows)
+    snapshot["filters"]["min_score"] = min_score
+    snapshot["filters"]["include_personas"] = include_personas
+    return snapshot
+
+
+def _graph_snapshot_from_rows(
+    topic_rows: list[dict[str, Any]],
+    similarity_edges: list[dict[str, Any]],
+    *,
+    include_personas: bool,
+) -> dict[str, Any]:
+    topic_ids = {str(row.get("topic_id")) for row in topic_rows if row.get("topic_id")}
+    nodes: dict[str, dict[str, Any]] = {}
+    cluster_topic_counts: dict[str, int] = {}
+    channels: set[str] = set()
+
+    for row in topic_rows:
+        topic_id = str(row.get("topic_id") or "")
+        if not topic_id:
+            continue
+        cluster_id = str(row.get("cluster_id") or f"singleton-{topic_id}")
+        cluster_label = str(row.get("cluster_label") or row.get("title") or "Unclustered")
+        topic_node_id = _topic_graph_id(topic_id)
+        cluster_node_id = _cluster_graph_id(cluster_id)
+        channel = str(row.get("channel") or "unknown")
+        channels.add(channel)
+        cluster_topic_counts[cluster_node_id] = cluster_topic_counts.get(cluster_node_id, 0) + 1
+
+        nodes[topic_node_id] = {
+            "id": topic_node_id,
+            "type": "topic",
+            "topic_id": topic_id,
+            "run_id": row.get("run_id"),
+            "label": row.get("title") or topic_id,
+            "title": row.get("title") or topic_id,
+            "channel": channel,
+            "cluster_id": cluster_id,
+            "cluster_label": cluster_label,
+            "decision": row.get("decision"),
+            "best_channel": row.get("best_channel"),
+            "next_action": row.get("next_action"),
+            "reliability_grade": row.get("reliability_grade") or "unknown",
+            "failure_rate": row.get("failure_rate") or 0.0,
+            "total_tokens": row.get("total_tokens") or 0,
+            "created_at": row.get("created_at"),
+            "similar_topics": [],
+        }
+        nodes.setdefault(
+            cluster_node_id,
+            {
+                "id": cluster_node_id,
+                "type": "cluster",
+                "cluster_id": cluster_id,
+                "label": cluster_label,
+                "title": cluster_label,
+                "topic_count": 0,
+            },
+        )
+
+    edges: list[dict[str, Any]] = []
+    for node in list(nodes.values()):
+        if node.get("type") != "topic":
+            continue
+        cluster_node_id = _cluster_graph_id(str(node.get("cluster_id") or ""))
+        edges.append(
+            {
+                "id": f"in-cluster:{node['id']}->{cluster_node_id}",
+                "type": "IN_CLUSTER",
+                "source": node["id"],
+                "target": cluster_node_id,
+                "score": 1.0,
+                "method": "cluster",
+            }
+        )
+
+    for edge in similarity_edges:
+        source_id = str(edge.get("source_topic_id") or "")
+        target_id = str(edge.get("target_topic_id") or "")
+        if source_id not in topic_ids or target_id not in topic_ids:
+            continue
+        score = _safe_float(edge.get("score"))
+        source_node_id = _topic_graph_id(source_id)
+        target_node_id = _topic_graph_id(target_id)
+        graph_edge = {
+            "id": f"similar:{source_id}->{target_id}",
+            "type": "SIMILAR_TO",
+            "source": source_node_id,
+            "target": target_node_id,
+            "score": round(score, 3),
+            "method": edge.get("method") or "lexical",
+            "lexical_score": _nullable_float(edge.get("lexical_score")),
+            "semantic_score": _nullable_float(edge.get("semantic_score")),
+        }
+        edges.append(graph_edge)
+        source_node = nodes.get(source_node_id)
+        target_node = nodes.get(target_node_id)
+        if source_node and target_node:
+            source_node["similar_topics"].append(
+                {
+                    "title": target_node.get("title"),
+                    "score": graph_edge["score"],
+                    "method": graph_edge["method"],
+                }
+            )
+
+    clusters = []
+    for node_id, count in cluster_topic_counts.items():
+        if node_id in nodes:
+            nodes[node_id]["topic_count"] = count
+            clusters.append(
+                {
+                    "id": nodes[node_id]["cluster_id"],
+                    "label": nodes[node_id]["label"],
+                    "topic_count": count,
+                }
+            )
+
+    node_values = list(nodes.values())
+    return {
+        "nodes": node_values,
+        "edges": edges,
+        "stats": {
+            "topic_count": sum(1 for node in node_values if node.get("type") == "topic"),
+            "cluster_count": sum(1 for node in node_values if node.get("type") == "cluster"),
+            "similarity_edge_count": sum(1 for edge in edges if edge.get("type") == "SIMILAR_TO"),
+            "edge_count": len(edges),
+            "persona_overlay_included": include_personas,
+        },
+        "filters": {
+            "channels": sorted(channels),
+            "clusters": sorted(clusters, key=lambda item: item["label"]),
+            "include_personas": include_personas,
+        },
+    }
+
+
+def _topic_graph_id(topic_id: str) -> str:
+    return f"topic:{topic_id}"
+
+
+def _cluster_graph_id(cluster_id: str) -> str:
+    return f"cluster:{cluster_id}"
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _nullable_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return round(_safe_float(value), 3)
 
 
 def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
