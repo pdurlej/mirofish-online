@@ -1,262 +1,240 @@
 <template>
-  <div class="home-container">
-    <!-- Top Navigation Bar -->
-    <nav class="navbar" :style="s.navbar">
-      <div class="nav-brand" :style="s.navBrand">MIROFISH ONLINE</div>
-      <div class="nav-links" :style="s.navLinks">
-        <button type="button" :style="s.audienceLink" @click="router.push('/audience')">
-          Audience Graph <span>→</span>
-        </button>
-        <a href="https://github.com/nikmcfly/MiroFish-Offline" target="_blank" class="github-link" :style="s.githubLink">
-          Visit our Github <span>↗</span>
+  <div class="home-page">
+    <nav class="site-nav">
+      <button class="brand-button" type="button" @click="router.push('/')">
+        <span class="brand-mark"><img :src="brandMark" alt="MiroFish" /></span>
+        <span class="brand-copy">
+          <strong>MiroFish</strong>
+          <span>Online</span>
+        </span>
+      </button>
+
+      <div class="nav-links">
+        <button class="nav-link" type="button" @click="router.push('/audience')">Audience Lab</button>
+        <button class="nav-link accent" type="button" @click="router.push('/audience/graph')">Graph</button>
+        <a class="nav-link" href="https://github.com/pdurlej/mirofish-online" target="_blank" rel="noreferrer">
+          GitHub
         </a>
       </div>
     </nav>
 
-    <div class="main-content" :style="s.mainContent">
-      <!-- Hero Section -->
-      <section class="hero-section" :style="s.heroSection">
-        <div class="hero-left" :style="s.heroLeft">
-          <div class="tag-row" :style="s.tagRow">
-            <span class="orange-tag" :style="s.orangeTag">Private Audience Graph</span>
-            <span class="version-text" :style="s.versionText">/ v0.1-preview</span>
-          </div>
-
-          <h1 class="main-title" :style="s.mainTitle">
-            Test Content Ideas<br>
-            <span class="gradient-text" :style="s.gradientText">Before You Spend Attention</span>
-          </h1>
-
-          <div class="hero-desc" :style="s.heroDesc">
-            <p :style="s.heroDescP">
-              <span :style="s.highlightBold">MiroFish Online</span> is a private audience-simulation fork for solo operators. It uses a local graph where that matters and cloud models where they provide leverage, so you can test podcast, writing, and product ideas without needing workstation-grade GPU hardware.
-            </p>
-            <p class="slogan-text" :style="s.sloganText">
-              Tailnet-first, operator-owned, optimized for practical judgment over infrastructure theater<span :style="s.blinkingCursor">_</span>
-            </p>
-          </div>
-
-          <div class="decoration-square" :style="s.decorationSquare"></div>
-        </div>
-
-        <div class="hero-right" :style="s.heroRight">
-          <div class="logo-container" :style="s.logoContainer">
-            <img src="../assets/logo/MiroFish_logo_left.jpeg" alt="MiroFish Logo" :style="s.heroLogo" />
-          </div>
-          <button :style="s.scrollDownBtn" @click="scrollToBottom">↓</button>
-        </div>
-      </section>
-
-      <!-- Dashboard: Two-Column Layout -->
-      <section class="dashboard-section" :style="s.dashboardSection">
-        <!-- Left Column: Status & Steps -->
-        <div class="left-panel" :style="s.leftPanel">
-          <div class="panel-header" :style="s.panelHeader">
-            <span :style="s.statusDot">■</span> System Status
-          </div>
-
-          <h2 class="section-title" :style="s.sectionTitle">Ready</h2>
-          <p class="section-desc" :style="s.sectionDesc">
-            Private audience workflow on standby. Use the classic document simulation flow or start with the new Audience Graph path.
+    <main class="home-shell">
+      <section class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Synthetic Audience Graph</p>
+          <h1>Test ideas before they spend your attention.</h1>
+          <p class="hero-text">
+            MiroFish turns rough content, product, and startup questions into
+            structured reactions from a stable synthetic audience. Each run
+            becomes part of a living graph, so later ideas reveal repeated
+            objections, clusters, and promising branches.
           </p>
 
-          <div class="metrics-row" :style="s.metricsRow">
-            <div class="metric-card" :style="s.metricCard">
-              <div class="metric-value" :style="s.metricValue">Hybrid</div>
-              <div class="metric-label" :style="s.metricLabel">Cloud LLMs + local graph</div>
-            </div>
-            <div class="metric-card" :style="s.metricCard">
-              <div class="metric-value" :style="s.metricValue">Tailnet</div>
-              <div class="metric-label" :style="s.metricLabel">Private route, not public SaaS</div>
-            </div>
-          </div>
-
-          <div class="steps-container" :style="s.stepsContainer">
-            <div class="steps-header" :style="s.stepsHeader">
-               <span :style="s.diamondIcon">◇</span> Workflow Sequence
-            </div>
-            <div :style="s.workflowList">
-              <div v-for="(step, i) in steps" :key="i" :style="s.workflowItem">
-                <span :style="s.stepNum">{{ step.num }}</span>
-                <div :style="s.stepInfo">
-                  <div :style="s.stepTitle">{{ step.title }}</div>
-                  <div :style="s.stepDesc">{{ step.desc }}</div>
-                </div>
-              </div>
-            </div>
+          <div class="hero-actions">
+            <button class="primary-action" type="button" @click="router.push('/audience')">
+              Run audience test
+              <span>→</span>
+            </button>
+            <button class="secondary-action" type="button" @click="router.push('/audience/graph')">
+              Open graph
+            </button>
           </div>
         </div>
 
-        <!-- Right Column: Interactive Console -->
-        <div class="right-panel" :style="s.rightPanel">
-          <div class="console-box" :style="s.consoleBox">
-            <div :style="s.consoleSection">
-              <div class="console-header" :style="s.consoleHeader">
-                <span>01 / Reality Seeds</span>
-                <span>Supported: PDF, MD, TXT</span>
-              </div>
-              <div
-                :style="s.uploadZone"
-                @dragover.prevent="handleDragOver"
-                @dragleave.prevent="handleDragLeave"
-                @drop.prevent="handleDrop"
-                @click="triggerFileInput"
-              >
-                <input ref="fileInput" type="file" multiple accept=".pdf,.md,.txt" @change="handleFileSelect" style="display: none" :disabled="loading" />
-                <div v-if="files.length === 0" :style="s.uploadPlaceholder">
-                  <div :style="s.uploadIcon">↑</div>
-                  <div :style="s.uploadTitle">Drag & drop files here</div>
-                  <div :style="s.uploadHint">or click to browse</div>
-                </div>
-                <div v-else :style="s.fileList">
-                  <div v-for="(file, index) in files" :key="index" :style="s.fileItem">
-                    <span>📄</span>
-                    <span :style="s.fileName">{{ file.name }}</span>
-                    <button @click.stop="removeFile(index)" :style="s.removeBtn">×</button>
-                  </div>
-                </div>
-              </div>
+        <aside class="signal-card">
+          <div class="signal-orbit">
+            <img :src="brandMark" alt="" />
+            <span class="orbit one"></span>
+            <span class="orbit two"></span>
+            <span class="node a"></span>
+            <span class="node b"></span>
+            <span class="node c"></span>
+          </div>
+          <div class="signal-summary">
+            <span class="live-dot"></span>
+            <span>Graph memory online</span>
+          </div>
+          <div class="stat-grid">
+            <div>
+              <strong>20</strong>
+              <span>personas</span>
             </div>
-
-            <div :style="s.consoleDivider"><span :style="s.consoleDividerText">Parameters</span></div>
-
-            <div :style="s.consoleSection">
-              <div class="console-header" :style="s.consoleHeader">
-                <span>>_ 02 / Simulation Prompt</span>
-              </div>
-              <div :style="s.inputWrapper">
-                <textarea v-model="formData.simulationRequirement" :style="s.codeInput" placeholder="// Describe your simulation or prediction goal in natural language" rows="6" :disabled="loading"></textarea>
-              <div :style="s.modelBadge">Engine: cloud LLMs + Neo4j memory</div>
-              </div>
+            <div>
+              <strong>Neo4j</strong>
+              <span>memory</span>
             </div>
-
-            <div :style="s.btnSection">
-              <button :style="s.startEngineBtn" @click="startSimulation" :disabled="!canSubmit || loading">
-                <span v-if="!loading">Start Engine</span>
-                <span v-else>Initializing...</span>
-                <span>→</span>
-              </button>
+            <div>
+              <strong>D3</strong>
+              <span>map</span>
             </div>
           </div>
-        </div>
+        </aside>
       </section>
 
-      <HistoryDatabase />
-    </div>
+      <section class="route-grid" aria-label="Primary workspaces">
+        <button class="route-card main-route" type="button" @click="router.push('/audience')">
+          <span class="card-kicker">01 / Audience Lab</span>
+          <strong>Topic tests</strong>
+          <span>Run the 20-person reviewer set and get objections, channel fit, reliability, cost, and next action.</span>
+        </button>
+        <button class="route-card" type="button" @click="router.push('/audience/graph')">
+          <span class="card-kicker">02 / Graph</span>
+          <strong>Trend map</strong>
+          <span>Scan clusters, semantic similarity edges, and previous topic branches across the full run history.</span>
+        </button>
+        <button class="route-card" type="button" @click="scrollToLab">
+          <span class="card-kicker">03 / Document Lab</span>
+          <strong>Simulation files</strong>
+          <span>Use the older document simulation lane when the input starts as PDFs, markdown, or text files.</span>
+        </button>
+      </section>
+
+      <section ref="labSection" class="document-lab">
+        <div class="lab-intro">
+          <p class="eyebrow">Legacy simulation lane</p>
+          <h2>Seed a file-backed simulation.</h2>
+          <p>
+            This lane keeps the existing document workflow available, but the
+            main product path is now the audience graph.
+          </p>
+
+          <div class="workflow-list">
+            <div v-for="step in steps" :key="step.num" class="workflow-item">
+              <span>{{ step.num }}</span>
+              <div>
+                <strong>{{ step.title }}</strong>
+                <small>{{ step.desc }}</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <form class="lab-console" @submit.prevent="startSimulation">
+          <div class="console-header">
+            <span>Reality seeds</span>
+            <span>PDF / MD / TXT</span>
+          </div>
+
+          <div
+            class="upload-zone"
+            :class="{ active: isDragOver, filled: files.length > 0 }"
+            @dragover.prevent="handleDragOver"
+            @dragleave.prevent="handleDragLeave"
+            @drop.prevent="handleDrop"
+            @click="triggerFileInput"
+          >
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              accept=".pdf,.md,.txt"
+              :disabled="loading"
+              @change="handleFileSelect"
+            />
+            <div v-if="files.length === 0" class="upload-placeholder">
+              <strong>Drop files</strong>
+              <span>or browse from disk</span>
+            </div>
+            <div v-else class="file-list">
+              <div v-for="(file, index) in files" :key="`${file.name}-${index}`" class="file-item">
+                <span class="file-ext">{{ fileExtension(file.name) }}</span>
+                <span class="file-name">{{ file.name }}</span>
+                <button type="button" class="remove-file" @click.stop="removeFile(index)">×</button>
+              </div>
+            </div>
+          </div>
+
+          <label class="prompt-field">
+            <span>Simulation prompt</span>
+            <textarea
+              v-model="formData.simulationRequirement"
+              rows="7"
+              placeholder="Describe the simulation goal or prediction question..."
+              :disabled="loading"
+            />
+          </label>
+
+          <button class="primary-action wide" type="submit" :disabled="!canSubmit || loading">
+            <span>{{ loading ? 'Starting...' : 'Start document simulation' }}</span>
+            <span>→</span>
+          </button>
+          <p v-if="error" class="error-text">{{ error }}</p>
+        </form>
+      </section>
+
+      <section class="history-wrap">
+        <HistoryDatabase />
+      </section>
+    </main>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
-
-const mono = 'JetBrains Mono, monospace'
-const sans = 'Space Grotesk, Noto Sans SC, system-ui, sans-serif'
-
-const s = reactive({
-  navbar: { height: '60px', background: '#000', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px' },
-  navBrand: { fontFamily: mono, fontWeight: '800', letterSpacing: '1px', fontSize: '1.2rem' },
-  navLinks: { display: 'flex', alignItems: 'center', gap: '14px' },
-  audienceLink: { color: '#fff', background: 'transparent', border: '1px solid #444', padding: '8px 12px', fontFamily: mono, fontSize: '0.85rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
-  githubLink: { color: '#fff', textDecoration: 'none', fontFamily: mono, fontSize: '0.9rem', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' },
-  mainContent: { maxWidth: '1400px', margin: '0 auto', padding: '60px 40px' },
-  heroSection: { display: 'flex', justifyContent: 'space-between', marginBottom: '80px', position: 'relative' },
-  heroLeft: { flex: '1', paddingRight: '60px' },
-  tagRow: { display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '25px', fontFamily: mono, fontSize: '0.8rem' },
-  orangeTag: { background: '#FF4500', color: '#fff', padding: '4px 10px', fontWeight: '700', letterSpacing: '1px', fontSize: '0.75rem' },
-  versionText: { color: '#999', fontWeight: '500', letterSpacing: '0.5px' },
-  mainTitle: { fontSize: '4.5rem', lineHeight: '1.2', fontWeight: '500', margin: '0 0 40px 0', letterSpacing: '-2px', color: '#000' },
-  gradientText: { background: 'linear-gradient(90deg, #000 0%, #444 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', display: 'inline-block' },
-  heroDesc: { fontSize: '1.05rem', lineHeight: '1.8', color: '#666', maxWidth: '640px', marginBottom: '50px', fontWeight: '400', textAlign: 'justify' },
-  heroDescP: { marginBottom: '1.5rem' },
-  highlightBold: { color: '#000', fontWeight: '700' },
-  highlightOrange: { color: '#FF4500', fontWeight: '700', fontFamily: mono },
-  highlightCode: { background: 'rgba(0,0,0,0.05)', padding: '2px 6px', borderRadius: '2px', fontFamily: mono, fontSize: '0.9em', color: '#000', fontWeight: '600' },
-  sloganText: { fontSize: '1.2rem', fontWeight: '520', color: '#000', letterSpacing: '1px', borderLeft: '3px solid #FF4500', paddingLeft: '15px', marginTop: '20px' },
-  blinkingCursor: { color: '#FF4500', fontWeight: '700' },
-  decorationSquare: { width: '16px', height: '16px', background: '#FF4500' },
-  heroRight: { flex: '0.8', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' },
-  logoContainer: { width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: '40px' },
-  heroLogo: { maxWidth: '500px', width: '100%' },
-  scrollDownBtn: { width: '40px', height: '40px', border: '1px solid #E5E5E5', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#FF4500', fontSize: '1.2rem' },
-  dashboardSection: { display: 'flex', gap: '60px', borderTop: '1px solid #E5E5E5', paddingTop: '60px', alignItems: 'flex-start' },
-  leftPanel: { flex: '0.8', display: 'flex', flexDirection: 'column' },
-  panelHeader: { fontFamily: mono, fontSize: '0.8rem', color: '#999', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' },
-  statusDot: { color: '#FF4500', fontSize: '0.8rem' },
-  sectionTitle: { fontSize: '2rem', fontWeight: '520', margin: '0 0 15px 0' },
-  sectionDesc: { color: '#666', marginBottom: '25px', lineHeight: '1.6' },
-  metricsRow: { display: 'flex', gap: '20px', marginBottom: '15px' },
-  metricCard: { border: '1px solid #E5E5E5', padding: '20px 30px', minWidth: '150px' },
-  metricValue: { fontFamily: mono, fontSize: '1.8rem', fontWeight: '520', marginBottom: '5px' },
-  metricLabel: { fontSize: '0.85rem', color: '#999' },
-  stepsContainer: { border: '1px solid #E5E5E5', padding: '30px', position: 'relative' },
-  stepsHeader: { fontFamily: mono, fontSize: '0.8rem', color: '#999', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '8px' },
-  diamondIcon: { fontSize: '1.2rem', lineHeight: '1' },
-  workflowList: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  workflowItem: { display: 'flex', alignItems: 'flex-start', gap: '20px' },
-  stepNum: { fontFamily: mono, fontWeight: '700', color: '#000', opacity: '0.3' },
-  stepInfo: { flex: '1' },
-  stepTitle: { fontWeight: '520', fontSize: '1rem', marginBottom: '4px' },
-  stepDesc: { fontSize: '0.85rem', color: '#666' },
-  rightPanel: { flex: '1.2', display: 'flex', flexDirection: 'column' },
-  consoleBox: { border: '1px solid #CCC', padding: '8px' },
-  consoleSection: { padding: '20px' },
-  consoleHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontFamily: mono, fontSize: '0.75rem', color: '#666' },
-  uploadZone: { border: '1px dashed #CCC', height: '200px', overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#FAFAFA' },
-  uploadPlaceholder: { textAlign: 'center' },
-  uploadIcon: { width: '40px', height: '40px', border: '1px solid #DDD', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 15px', color: '#999' },
-  uploadTitle: { fontWeight: '500', fontSize: '0.9rem', marginBottom: '5px' },
-  uploadHint: { fontFamily: mono, fontSize: '0.75rem', color: '#999' },
-  fileList: { width: '100%', padding: '15px', display: 'flex', flexDirection: 'column', gap: '10px' },
-  fileItem: { display: 'flex', alignItems: 'center', background: '#fff', padding: '8px 12px', border: '1px solid #EEE', fontFamily: mono, fontSize: '0.85rem' },
-  fileName: { flex: '1', margin: '0 10px' },
-  removeBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: '#999' },
-  consoleDivider: { display: 'flex', alignItems: 'center', margin: '10px 0', borderTop: '1px solid #EEE' },
-  consoleDividerText: { padding: '0 15px', fontFamily: mono, fontSize: '0.7rem', color: '#BBB', letterSpacing: '1px' },
-  inputWrapper: { position: 'relative', border: '1px solid #DDD', background: '#FAFAFA' },
-  codeInput: { width: '100%', border: 'none', background: 'transparent', padding: '20px', fontFamily: mono, fontSize: '0.9rem', lineHeight: '1.6', resize: 'vertical', outline: 'none', minHeight: '150px' },
-  modelBadge: { position: 'absolute', bottom: '10px', right: '15px', fontFamily: mono, fontSize: '0.7rem', color: '#AAA' },
-  btnSection: { padding: '0 20px 20px' },
-  startEngineBtn: { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '20px', fontFamily: mono, fontWeight: '700', fontSize: '1.1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', letterSpacing: '1px' },
-})
+import brandMark from './audienceGraph/brand-mark.png'
 
 const steps = [
-  { num: '01', title: 'Graph Build', desc: 'Extract reality seeds from your document, build knowledge graph with Neo4j + GraphRAG' },
-  { num: '02', title: 'Env Setup', desc: 'Generate agent personas, configure simulation parameters via local Ollama LLM' },
-  { num: '03', title: 'Simulation', desc: 'Run multi-agent simulation locally with dynamic memory updates and emergent behavior' },
-  { num: '04', title: 'Report', desc: 'ReportAgent analyzes the simulation results and generates a detailed prediction report' },
-  { num: '05', title: 'Interaction', desc: 'Chat with any agent from the simulated world or discuss findings with ReportAgent' },
+  { num: '01', title: 'Graph Build', desc: 'Extract entities and relations from source material.' },
+  { num: '02', title: 'Environment Setup', desc: 'Generate simulation context and reviewer constraints.' },
+  { num: '03', title: 'Simulation', desc: 'Run the multi-agent sequence and collect state changes.' },
+  { num: '04', title: 'Report', desc: 'Summarize outcomes into a decision-ready report.' },
+  { num: '05', title: 'Interaction', desc: 'Inspect findings or continue with the generated context.' },
 ]
 
 const router = useRouter()
-
 const formData = ref({ simulationRequirement: '' })
 const files = ref([])
 const loading = ref(false)
 const error = ref('')
 const isDragOver = ref(false)
 const fileInput = ref(null)
+const labSection = ref(null)
 
 const canSubmit = computed(() => {
   return formData.value.simulationRequirement.trim() !== '' && files.value.length > 0
 })
 
-const triggerFileInput = () => { if (!loading.value) fileInput.value?.click() }
-const handleFileSelect = (event) => { addFiles(Array.from(event.target.files)) }
-const handleDragOver = (e) => { isDragOver.value = true }
-const handleDragLeave = (e) => { isDragOver.value = false }
-const handleDrop = (e) => { isDragOver.value = false; addFiles(Array.from(e.dataTransfer.files)) }
+const triggerFileInput = () => {
+  if (!loading.value) fileInput.value?.click()
+}
+
+const handleFileSelect = (event) => {
+  addFiles(Array.from(event.target.files || []))
+  event.target.value = ''
+}
+
+const handleDragOver = () => {
+  isDragOver.value = true
+}
+
+const handleDragLeave = () => {
+  isDragOver.value = false
+}
+
+const handleDrop = (event) => {
+  isDragOver.value = false
+  addFiles(Array.from(event.dataTransfer?.files || []))
+}
 
 const addFiles = (newFiles) => {
   const allowed = ['.pdf', '.md', '.txt']
-  const valid = newFiles.filter(f => allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
+  const valid = newFiles.filter((file) => allowed.some((ext) => file.name.toLowerCase().endsWith(ext)))
   files.value = [...files.value, ...valid]
 }
 
-const removeFile = (index) => { files.value.splice(index, 1) }
+const removeFile = (index) => {
+  files.value.splice(index, 1)
+}
 
-const scrollToBottom = () => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) }
+const scrollToLab = () => {
+  labSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const fileExtension = (filename) => {
+  return filename.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'
+}
 
 const startSimulation = () => {
   if (!canSubmit.value || loading.value) return
@@ -267,4 +245,725 @@ const startSimulation = () => {
 }
 </script>
 
-<!-- Styles loaded from Home.css via import -->
+<style scoped>
+.home-page {
+  min-height: 100vh;
+  color: var(--mf-ink);
+  background:
+    linear-gradient(rgba(67, 205, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(67, 205, 255, 0.05) 1px, transparent 1px),
+    radial-gradient(circle at 16% 12%, rgba(56, 225, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 82% 0%, rgba(137, 92, 255, 0.18), transparent 28%),
+    var(--mf-bg);
+  background-size: 44px 44px, 44px 44px, auto, auto, auto;
+}
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 72px;
+  padding: 0 clamp(18px, 4vw, 48px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid rgba(132, 184, 209, 0.2);
+  background: rgba(5, 9, 18, 0.78);
+  backdrop-filter: blur(18px);
+}
+
+.brand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(56, 225, 255, 0.34);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 32px rgba(56, 225, 255, 0.14);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brand-copy {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.brand-copy strong {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand-copy span,
+.eyebrow,
+.card-kicker,
+.console-header,
+.workflow-item span,
+.file-ext {
+  font-family: var(--mf-font-mono);
+}
+
+.brand-copy span {
+  color: var(--mf-ink-faint);
+  font-size: 0.78rem;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-link,
+.primary-action,
+.secondary-action {
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 0 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(132, 184, 209, 0.26);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--mf-ink);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.nav-link:hover,
+.secondary-action:hover,
+.primary-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(56, 225, 255, 0.62);
+}
+
+.nav-link.accent,
+.primary-action {
+  border-color: rgba(56, 225, 255, 0.54);
+  background: linear-gradient(135deg, rgba(56, 225, 255, 0.26), rgba(87, 121, 255, 0.18));
+  box-shadow: 0 0 34px rgba(56, 225, 255, 0.12);
+}
+
+.home-shell {
+  width: min(1220px, calc(100% - 36px));
+  margin: 0 auto;
+  padding: clamp(36px, 6vw, 78px) 0 80px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 410px);
+  align-items: stretch;
+  gap: clamp(22px, 4vw, 42px);
+}
+
+.hero-copy {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.eyebrow {
+  margin: 0 0 16px;
+  color: var(--mf-accent);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h1 {
+  max-width: 820px;
+  font-size: clamp(3rem, 8vw, 7.3rem);
+  line-height: 0.9;
+  font-weight: 800;
+}
+
+h2 {
+  font-size: clamp(2rem, 4vw, 3.6rem);
+  line-height: 1;
+}
+
+.hero-text {
+  max-width: 720px;
+  margin: 28px 0 0;
+  color: var(--mf-ink-muted);
+  font-size: 1.05rem;
+  line-height: 1.75;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.primary-action {
+  min-height: 48px;
+  padding: 0 20px;
+  font-weight: 800;
+}
+
+.primary-action.wide {
+  width: 100%;
+  justify-content: space-between;
+  border-radius: 14px;
+}
+
+.primary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.secondary-action {
+  min-height: 48px;
+  padding: 0 20px;
+}
+
+.signal-card,
+.route-card,
+.document-lab,
+.lab-console {
+  border: 1px solid var(--mf-border);
+  background: linear-gradient(180deg, rgba(11, 26, 41, 0.82), rgba(6, 14, 24, 0.82));
+  box-shadow: var(--mf-shadow);
+}
+
+.signal-card {
+  min-height: 520px;
+  border-radius: 28px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  position: relative;
+}
+
+.signal-card::before {
+  content: '';
+  position: absolute;
+  inset: -30% -20% auto auto;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 225, 255, 0.22), transparent 62%);
+}
+
+.signal-orbit {
+  position: relative;
+  min-height: 330px;
+  display: grid;
+  place-items: center;
+}
+
+.signal-orbit img {
+  width: 104px;
+  height: 104px;
+  border-radius: 26px;
+  object-fit: cover;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 48px rgba(56, 225, 255, 0.22);
+}
+
+.orbit,
+.node {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.orbit {
+  border: 1px solid rgba(108, 190, 231, 0.23);
+}
+
+.orbit.one {
+  width: 220px;
+  height: 220px;
+}
+
+.orbit.two {
+  width: 300px;
+  height: 300px;
+  border-style: dashed;
+}
+
+.node {
+  width: 12px;
+  height: 12px;
+  background: var(--mf-accent);
+  box-shadow: 0 0 22px currentColor;
+}
+
+.node.a {
+  top: 54px;
+  right: 64px;
+  color: #38e1ff;
+}
+
+.node.b {
+  left: 46px;
+  bottom: 82px;
+  color: #a78bfa;
+  background: #a78bfa;
+}
+
+.node.c {
+  right: 92px;
+  bottom: 48px;
+  color: #66f2a7;
+  background: #66f2a7;
+}
+
+.signal-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--mf-ink-muted);
+  font-family: var(--mf-font-mono);
+  font-size: 0.82rem;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--mf-green);
+  box-shadow: 0 0 18px rgba(102, 242, 167, 0.8);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.stat-grid div {
+  border: 1px solid rgba(132, 184, 209, 0.18);
+  border-radius: 14px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.stat-grid strong,
+.stat-grid span {
+  display: block;
+}
+
+.stat-grid strong {
+  font-family: var(--mf-font-mono);
+}
+
+.stat-grid span {
+  margin-top: 4px;
+  color: var(--mf-ink-faint);
+  font-size: 0.78rem;
+}
+
+.route-grid {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 14px;
+}
+
+.route-card {
+  min-height: 190px;
+  border-radius: 22px;
+  padding: 22px;
+  text-align: left;
+  color: var(--mf-ink);
+  cursor: pointer;
+}
+
+.route-card:hover {
+  border-color: var(--mf-border-strong);
+  transform: translateY(-2px);
+}
+
+.route-card strong,
+.route-card span {
+  display: block;
+}
+
+.card-kicker {
+  color: var(--mf-accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.route-card strong {
+  margin-top: 22px;
+  font-size: 1.4rem;
+}
+
+.route-card > span:last-child {
+  margin-top: 12px;
+  color: var(--mf-ink-muted);
+  line-height: 1.55;
+}
+
+.main-route {
+  background:
+    radial-gradient(circle at 88% 12%, rgba(56, 225, 255, 0.22), transparent 30%),
+    linear-gradient(180deg, rgba(15, 38, 58, 0.96), rgba(7, 19, 32, 0.92));
+}
+
+.document-lab {
+  margin-top: 24px;
+  border-radius: 28px;
+  padding: clamp(18px, 3vw, 28px);
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(320px, 1.22fr);
+  gap: 24px;
+}
+
+.lab-intro {
+  padding: 12px 6px;
+}
+
+.lab-intro p:not(.eyebrow) {
+  color: var(--mf-ink-muted);
+  line-height: 1.7;
+  margin-top: 18px;
+}
+
+.workflow-list {
+  margin-top: 26px;
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-item {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid rgba(132, 184, 209, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.workflow-item > span {
+  color: var(--mf-accent);
+  font-size: 0.76rem;
+}
+
+.workflow-item strong,
+.workflow-item small {
+  display: block;
+}
+
+.workflow-item small {
+  margin-top: 4px;
+  color: var(--mf-ink-faint);
+  line-height: 1.4;
+}
+
+.lab-console {
+  border-radius: 22px;
+  padding: 20px;
+}
+
+.console-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--mf-ink-faint);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.upload-zone {
+  min-height: 190px;
+  border: 1px dashed rgba(132, 184, 209, 0.34);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.upload-zone.active,
+.upload-zone:hover {
+  border-color: var(--mf-accent);
+  background: rgba(56, 225, 255, 0.08);
+}
+
+.upload-zone.filled {
+  place-items: stretch;
+}
+
+.upload-zone input {
+  display: none;
+}
+
+.upload-placeholder {
+  display: grid;
+  gap: 6px;
+  text-align: center;
+}
+
+.upload-placeholder strong {
+  font-size: 1.1rem;
+}
+
+.upload-placeholder span {
+  color: var(--mf-ink-faint);
+}
+
+.file-list {
+  width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(132, 184, 209, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.file-ext {
+  color: var(--mf-accent);
+  font-size: 0.68rem;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove-file {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(132, 184, 209, 0.25);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.prompt-field {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  color: var(--mf-ink-muted);
+}
+
+textarea {
+  width: 100%;
+  border: 1px solid rgba(132, 184, 209, 0.24);
+  border-radius: 16px;
+  background: rgba(3, 10, 18, 0.62);
+  color: var(--mf-ink);
+  padding: 16px;
+  resize: vertical;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 3px rgba(56, 225, 255, 0.12);
+}
+
+.error-text {
+  margin-top: 12px;
+  color: var(--mf-red);
+}
+
+.history-wrap {
+  margin-top: 30px;
+  border: 1px solid var(--mf-border);
+  border-radius: 28px;
+  background: rgba(5, 13, 23, 0.72);
+  overflow: hidden;
+}
+
+.history-wrap :deep(.history-database) {
+  margin-top: 0;
+  padding: 28px 0 38px;
+}
+
+.history-wrap :deep(.grid-pattern) {
+  background-image:
+    linear-gradient(to right, rgba(56, 225, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 225, 255, 0.07) 1px, transparent 1px);
+}
+
+.history-wrap :deep(.gradient-overlay) {
+  background:
+    linear-gradient(to right, rgba(5, 13, 23, 0.96) 0%, transparent 18%, transparent 82%, rgba(5, 13, 23, 0.96) 100%),
+    linear-gradient(to bottom, rgba(5, 13, 23, 0.9) 0%, transparent 22%, transparent 78%, rgba(5, 13, 23, 0.9) 100%);
+}
+
+.history-wrap :deep(.section-title) {
+  color: var(--mf-ink-muted);
+}
+
+.history-wrap :deep(.section-line) {
+  background: linear-gradient(90deg, transparent, rgba(56, 225, 255, 0.32), transparent);
+}
+
+.history-wrap :deep(.project-card),
+.history-wrap :deep(.modal-content),
+.history-wrap :deep(.modal-header),
+.history-wrap :deep(.modal-actions),
+.history-wrap :deep(.modal-playback-hint) {
+  background: #0b1726;
+  color: var(--mf-ink);
+  border-color: rgba(132, 184, 209, 0.2);
+}
+
+.history-wrap :deep(.project-card:hover) {
+  border-color: rgba(56, 225, 255, 0.55);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.history-wrap :deep(.card-title),
+.history-wrap :deep(.modal-id),
+.history-wrap :deep(.modal-label),
+.history-wrap :deep(.btn-text) {
+  color: var(--mf-ink);
+}
+
+.history-wrap :deep(.card-id),
+.history-wrap :deep(.card-desc),
+.history-wrap :deep(.card-footer),
+.history-wrap :deep(.file-name),
+.history-wrap :deep(.modal-create-time),
+.history-wrap :deep(.modal-file-name),
+.history-wrap :deep(.modal-requirement),
+.history-wrap :deep(.hint-text) {
+  color: var(--mf-ink-muted);
+}
+
+.history-wrap :deep(.card-files-wrapper),
+.history-wrap :deep(.file-item),
+.history-wrap :deep(.modal-requirement),
+.history-wrap :deep(.modal-empty),
+.history-wrap :deep(.modal-file-item),
+.history-wrap :deep(.modal-btn) {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(132, 184, 209, 0.18);
+}
+
+.history-wrap :deep(.card-bottom-line) {
+  background-color: var(--mf-accent);
+}
+
+@media (max-width: 980px) {
+  .hero-grid,
+  .document-lab,
+  .route-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-copy,
+  .signal-card {
+    min-height: auto;
+  }
+
+  .signal-card {
+    min-height: 420px;
+  }
+}
+
+@media (max-width: 640px) {
+  .site-nav {
+    height: auto;
+    padding: 12px 14px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nav-links {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .nav-link {
+    white-space: nowrap;
+  }
+
+  .home-shell {
+    width: min(100% - 24px, 1220px);
+    padding-top: 28px;
+  }
+
+  h1 {
+    font-size: clamp(2.7rem, 17vw, 4rem);
+  }
+
+  .hero-actions,
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-actions {
+    display: grid;
+  }
+
+  .signal-orbit {
+    min-height: 260px;
+  }
+
+  .orbit.one {
+    width: 180px;
+    height: 180px;
+  }
+
+  .orbit.two {
+    width: 240px;
+    height: 240px;
+  }
+
+  .document-lab,
+  .signal-card,
+  .route-card,
+  .lab-console {
+    border-radius: 18px;
+  }
+}
+</style>
