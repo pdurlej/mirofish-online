@@ -15,6 +15,12 @@ from ..utils.llm_client import LLMClient, LLMChatResult, validate_json_schema
 from .audience_run import AudienceRunInput, AudienceRunResult
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
+from .similarity import (
+    EmbeddingProvider,
+    assign_topic_cluster,
+    build_persona_memory,
+    build_similarity_edges,
+)
 
 
 REACTION_SCHEMA: dict[str, Any] = {
@@ -49,17 +55,67 @@ REACTION_SCHEMA: dict[str, Any] = {
 class AudienceRunFailed(RuntimeError):
     """Raised when a live run crosses the controlled-failure threshold."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        receipt: dict[str, Any] | None = None,
+        failures: list[dict[str, Any]] | None = None,
+        partial_counts: dict[str, int] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.receipt = receipt or {}
+        self.failures = failures or []
+        self.partial_counts = partial_counts or {}
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "receipt": self.receipt,
+            "failures": self.failures,
+            "partial_counts": self.partial_counts,
+        }
+
+
+@dataclass(frozen=True)
+class PersonaAttempt:
+    model: str
+    metadata: LLMChatResult | None
+    error_kind: str | None
+    schema_fallback: bool = False
+    high_quality_retry: bool = False
+
+
+class PersonaCallFailed(RuntimeError):
+    def __init__(
+        self,
+        error_kind: str,
+        *,
+        attempts: list[PersonaAttempt] | None = None,
+        high_quality_retry_used: bool = False,
+    ) -> None:
+        super().__init__(error_kind)
+        self.error_kind = error_kind
+        self.attempts = attempts or []
+        self.high_quality_retry_used = high_quality_retry_used
+
 
 @dataclass(frozen=True)
 class PersonaCallResult:
     parsed: dict[str, Any]
     metadata: LLMChatResult
     schema_fallback_used: bool
+    attempts: tuple[PersonaAttempt, ...] = ()
+    high_quality_retry_used: bool = False
 
 
 GENERIC_OBJECTION_FALLBACKS = {
     "this needs a clearer practical consequence.",
     "this needs a clearer practical consequence for the audience.",
+}
+RETRYABLE_PERSONA_ERRORS = {
+    "invalid_json",
+    "schema_validation_failed",
+    "low_quality_response",
 }
 
 
@@ -73,6 +129,7 @@ class AudienceLiveRunner:
         call_timeout_seconds: float = 45,
         run_timeout_seconds: float = 210,
         max_workers: int = 10,
+        embedding_service_factory: Callable[[], EmbeddingProvider] | None = None,
     ) -> None:
         self._client_factory = client_factory or (
             lambda: LLMClient(timeout=call_timeout_seconds)
@@ -81,6 +138,7 @@ class AudienceLiveRunner:
         self._failure_threshold = failure_threshold
         self._run_timeout_seconds = run_timeout_seconds
         self._max_workers = max(1, max_workers)
+        self._embedding_service_factory = embedding_service_factory
 
     def run(
         self,
@@ -116,7 +174,7 @@ class AudienceLiveRunner:
                 assignment = self._model_router.assign(persona, run_input.run_seed, run_id)
                 personas_payload.append(persona.to_dict() | {"model_assignment": assignment.to_dict()})
                 future = executor.submit(
-                    self._call_persona,
+                    self._call_persona_with_retry,
                     run_input,
                     persona,
                     assignment.model,
@@ -128,8 +186,15 @@ class AudienceLiveRunner:
                 try:
                     call = future.result()
                     parsed = call.parsed
+                    _record_attempts(receipt, call.attempts)
                     receipt["schema_fallback_count"] += int(call.schema_fallback_used)
-                    _record_usage(receipt, call.metadata)
+                    receipt["high_quality_retry_count"] += int(call.high_quality_retry_used)
+                    receipt["high_quality_retry_success_count"] += int(
+                        call.high_quality_retry_used
+                    )
+                    receipt["low_quality_persona_count"] += int(
+                        _has_attempt_error(call.attempts, "low_quality_response")
+                    )
                     reactions.append(
                         {
                             "id": f"reaction-{run_id[:8]}-{persona.id}",
@@ -153,6 +218,23 @@ class AudienceLiveRunner:
                             "id": f"insight-{run_id[:8]}-{persona.id}",
                             "text": parsed["insight"],
                             "persona_ids": [persona.id],
+                        }
+                    )
+                except PersonaCallFailed as exc:
+                    error_kind = exc.error_kind
+                    _record_attempts(receipt, exc.attempts)
+                    receipt["high_quality_retry_count"] += int(exc.high_quality_retry_used)
+                    receipt["high_quality_retry_failure_count"] += int(
+                        exc.high_quality_retry_used
+                    )
+                    receipt["low_quality_persona_count"] += int(
+                        _has_attempt_error(exc.attempts, "low_quality_response")
+                    )
+                    failures.append(
+                        {
+                            "persona_id": persona.id,
+                            "model": assignment.model,
+                            "error_kind": error_kind,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -185,13 +267,39 @@ class AudienceLiveRunner:
         finally:
             executor.shutdown(wait=not timed_out, cancel_futures=True)
 
-        if len(failures) / len(active_personas) > self._failure_threshold:
-            raise AudienceRunFailed("failure_threshold_exceeded")
-
         receipt["latency_ms"] = int((time.monotonic() - started) * 1000)
         receipt["failed_persona_count"] = len(failures)
         receipt["failure_rate"] = round(len(failures) / len(active_personas), 3)
         receipt["reliability_grade"] = _reliability_grade(receipt["failure_rate"])
+
+        if receipt["failure_rate"] > self._failure_threshold:
+            raise AudienceRunFailed(
+                "failure_threshold_exceeded",
+                receipt=receipt,
+                failures=failures,
+                partial_counts={
+                    "personas": len(active_personas),
+                    "reactions": len(reactions),
+                    "objections": len(objections),
+                    "insights": len(insights),
+                },
+            )
+
+        previous = previous_topics or []
+        embedding_provider = self._embedding_provider()
+        similarity_edges = build_similarity_edges(
+            topic,
+            previous,
+            embedding_provider=embedding_provider,
+        )
+        receipt["similarity"] = {
+            "semantic_provider_configured": self._embedding_service_factory is not None,
+            "semantic_edge_count": sum(
+                1 for edge in similarity_edges if edge.get("semantic_score") is not None
+            ),
+        }
+        assign_topic_cluster(topic, similarity_edges)
+        persona_memory = build_persona_memory(personas_payload, similarity_edges, previous)
 
         return AudienceRunResult(
             run_id=run_id,
@@ -202,16 +310,62 @@ class AudienceLiveRunner:
             objections=objections,
             insights=_select_insights(insights),
             recommendation=_recommendation_for(run_input, reactions, objections),
-            similarity_edges=_similarity_edges(topic, previous_topics or []),
+            similarity_edges=similarity_edges,
+            persona_memory=persona_memory,
             receipt=receipt,
             failures=failures,
         )
+
+    def _embedding_provider(self) -> EmbeddingProvider | None:
+        if not self._embedding_service_factory:
+            return None
+        try:
+            return self._embedding_service_factory()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _call_persona_with_retry(
+        self,
+        run_input: AudienceRunInput,
+        persona: AudiencePersona,
+        model: str,
+    ) -> PersonaCallResult:
+        try:
+            call = self._call_persona(run_input, persona, model)
+            return _ensure_success_attempts(call, high_quality_retry=False)
+        except PersonaCallFailed as exc:
+            if not _should_high_quality_retry(exc.error_kind, model, self._model_router.high_quality_retry_model):
+                raise
+            retry_model = self._model_router.high_quality_retry_model
+            try:
+                retry_call = self._call_persona(
+                    run_input,
+                    persona,
+                    retry_model,
+                    high_quality_retry=True,
+                )
+                retry_call = _ensure_success_attempts(retry_call, high_quality_retry=True)
+                return PersonaCallResult(
+                    parsed=retry_call.parsed,
+                    metadata=retry_call.metadata,
+                    schema_fallback_used=retry_call.schema_fallback_used,
+                    attempts=(*exc.attempts, *retry_call.attempts),
+                    high_quality_retry_used=True,
+                )
+            except PersonaCallFailed as retry_exc:
+                raise PersonaCallFailed(
+                    retry_exc.error_kind,
+                    attempts=[*exc.attempts, *retry_exc.attempts],
+                    high_quality_retry_used=True,
+                ) from retry_exc
 
     def _call_persona(
         self,
         run_input: AudienceRunInput,
         persona: AudiencePersona,
         model: str,
+        *,
+        high_quality_retry: bool = False,
     ) -> PersonaCallResult:
         client = self._client_factory()
         messages = _persona_messages(run_input, persona)
@@ -232,10 +386,45 @@ class AudienceLiveRunner:
                 model=model,
                 reasoning_effort=_reasoning_effort_for_model(model),
             )
-            parsed = _parse_and_validate(result.content)
-            _validate_reaction_quality(parsed)
-            return PersonaCallResult(parsed, result, False)
+            try:
+                parsed = _parse_and_validate(result.content)
+                _validate_reaction_quality(parsed)
+            except Exception as exc:  # noqa: BLE001
+                error_kind = _sanitized_error_kind(exc)
+                attempt = PersonaAttempt(
+                    model=result.model,
+                    metadata=result,
+                    error_kind=error_kind,
+                    high_quality_retry=high_quality_retry,
+                )
+                if not _looks_like_schema_retry(exc):
+                    raise PersonaCallFailed(error_kind, attempts=[attempt]) from exc
+                raise PersonaCallFailed(error_kind, attempts=[attempt]) from exc
+            attempt = PersonaAttempt(
+                model=result.model,
+                metadata=result,
+                error_kind=None,
+                high_quality_retry=high_quality_retry,
+            )
+            return PersonaCallResult(parsed, result, False, (attempt,))
         except Exception as exc:
+            if isinstance(exc, PersonaCallFailed):
+                if not _looks_like_schema_retry(exc):
+                    raise
+                attempts = list(exc.attempts)
+            else:
+                error_kind = _sanitized_error_kind(exc)
+                attempts = [
+                    PersonaAttempt(
+                        model=model,
+                        metadata=None,
+                        error_kind=error_kind,
+                        high_quality_retry=high_quality_retry,
+                    )
+                ]
+                if not _looks_like_schema_retry(exc):
+                    raise PersonaCallFailed(error_kind, attempts=attempts) from exc
+
             if not _looks_like_schema_retry(exc):
                 raise
 
@@ -257,12 +446,39 @@ class AudienceLiveRunner:
             model=model,
             reasoning_effort=_reasoning_effort_for_model(model),
         )
-        parsed = _parse_and_validate(result.content)
-        _validate_reaction_quality(parsed)
-        return PersonaCallResult(parsed, result, True)
+        try:
+            parsed = _parse_and_validate(result.content)
+            _validate_reaction_quality(parsed)
+        except Exception as exc:  # noqa: BLE001
+            error_kind = _sanitized_error_kind(exc)
+            attempts.append(
+                PersonaAttempt(
+                    model=result.model,
+                    metadata=result,
+                    error_kind=error_kind,
+                    schema_fallback=True,
+                    high_quality_retry=high_quality_retry,
+                )
+            )
+            raise PersonaCallFailed(error_kind, attempts=attempts) from exc
+        attempt = PersonaAttempt(
+            model=result.model,
+            metadata=result,
+            error_kind=None,
+            schema_fallback=True,
+            high_quality_retry=high_quality_retry,
+        )
+        return PersonaCallResult(parsed, result, True, (*attempts, attempt))
 
 
 def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
+    contract = (
+        'Return exactly one JSON object with these keys: "stance", "channel_fit", '
+        '"summary", "objection", "objection_severity", "insight", "decision_impact". '
+        'The first character must be "{" and the last character must be "}". '
+        "Use double quotes, no markdown, no prose, no arrays, no comments. "
+        "If the submitted topic is Polish, write JSON string values in Polish."
+    )
     return [
         {
             "role": "system",
@@ -271,7 +487,8 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
                 "content/product thinking panel. Answer as this persona only. "
                 "Be concrete, skeptical when appropriate, and return only JSON. "
                 "Keep every JSON string to one short sentence. Objections and insights "
-                "must mention a concrete part of the submitted topic, not generic advice."
+                "must mention a concrete part of the submitted topic, not generic advice. "
+                f"{contract}"
             ),
         },
         {
@@ -287,7 +504,8 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
                 f"Title: {run_input.display_title}\n"
                 f"Topic/draft:\n{run_input.topic}\n\n"
                 "Judge whether this should become a podcast, LinkedIn post, blog, "
-                "Twitter/X post, product idea, or be narrowed/rewritten."
+                "Twitter/X post, product idea, or be narrowed/rewritten.\n\n"
+                f"{contract}"
             ),
         },
     ]
@@ -403,6 +621,14 @@ def _empty_live_receipt() -> dict[str, Any]:
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "latency_ms": 0,
         "schema_fallback_count": 0,
+        "schema_fallback_attempt_count": 0,
+        "high_quality_retry_count": 0,
+        "high_quality_retry_success_count": 0,
+        "high_quality_retry_failure_count": 0,
+        "similarity": {
+            "semantic_provider_configured": False,
+            "semantic_edge_count": 0,
+        },
         "run_timed_out": False,
         "failed_persona_count": 0,
         "low_quality_persona_count": 0,
@@ -411,7 +637,24 @@ def _empty_live_receipt() -> dict[str, Any]:
     }
 
 
-def _record_usage(receipt: dict[str, Any], metadata: LLMChatResult) -> None:
+def _record_attempts(receipt: dict[str, Any], attempts: tuple[PersonaAttempt, ...] | list[PersonaAttempt]) -> None:
+    for attempt in attempts:
+        if attempt.schema_fallback:
+            receipt["schema_fallback_attempt_count"] += 1
+        if attempt.metadata:
+            _record_usage(receipt, attempt.metadata, failed=attempt.error_kind is not None)
+        else:
+            _record_failure(receipt, attempt.model)
+
+
+def _has_attempt_error(
+    attempts: tuple[PersonaAttempt, ...] | list[PersonaAttempt],
+    error_kind: str,
+) -> bool:
+    return any(attempt.error_kind == error_kind for attempt in attempts)
+
+
+def _record_usage(receipt: dict[str, Any], metadata: LLMChatResult, *, failed: bool = False) -> None:
     model = metadata.model
     model_entry = receipt["models"].setdefault(
         model,
@@ -425,6 +668,8 @@ def _record_usage(receipt: dict[str, Any], metadata: LLMChatResult) -> None:
         },
     )
     model_entry["calls"] += 1
+    if failed:
+        model_entry["failures"] += 1
     model_entry["latency_ms"] += metadata.latency_ms
     for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
         value = int(metadata.usage.get(key) or 0)
@@ -448,6 +693,33 @@ def _record_failure(receipt: dict[str, Any], model: str) -> None:
     model_entry["failures"] += 1
 
 
+def _ensure_success_attempts(
+    call: PersonaCallResult,
+    *,
+    high_quality_retry: bool,
+) -> PersonaCallResult:
+    if call.attempts:
+        return call
+    attempt = PersonaAttempt(
+        model=call.metadata.model,
+        metadata=call.metadata,
+        error_kind=None,
+        schema_fallback=call.schema_fallback_used,
+        high_quality_retry=high_quality_retry,
+    )
+    return PersonaCallResult(
+        parsed=call.parsed,
+        metadata=call.metadata,
+        schema_fallback_used=call.schema_fallback_used,
+        attempts=(attempt,),
+        high_quality_retry_used=high_quality_retry,
+    )
+
+
+def _should_high_quality_retry(error_kind: str, model: str, retry_model: str) -> bool:
+    return error_kind in RETRYABLE_PERSONA_ERRORS and model != retry_model
+
+
 def _recommendation_for(
     run_input: AudienceRunInput,
     reactions: list[dict[str, Any]],
@@ -455,19 +727,27 @@ def _recommendation_for(
 ) -> dict[str, Any]:
     skeptical = sum(1 for reaction in reactions if reaction["stance"] in {"skeptical", "needs_translation"})
     high_objections = sum(1 for objection in objections if objection["severity"] == "high")
+    question_driven = "?" in run_input.topic
     if skeptical >= 8:
         decision = "rewrite"
-    elif high_objections >= 6 or "?" in run_input.topic:
+    elif high_objections >= 6 or question_driven:
         decision = "narrow"
     else:
         decision = "publish"
+    best_channel = run_input.channel if run_input.channel != "unknown" else _best_channel(reactions)
+    top_objection = _representative_objection(objections)
+    polish = _is_likely_polish(run_input.topic)
     return {
         "decision": decision,
-        "best_channel": run_input.channel if run_input.channel != "unknown" else _best_channel(reactions),
-        "next_action": _next_action(decision),
-        "rationale": (
-            f"Live 20-person audience run: {skeptical} skeptical/translation-needed "
-            f"reactions and {high_objections} high-severity objections."
+        "best_channel": best_channel,
+        "next_action": _next_action(decision, best_channel, top_objection, polish=polish),
+        "rationale": _recommendation_rationale(
+            decision,
+            skeptical,
+            high_objections,
+            question_driven,
+            top_objection,
+            polish=polish,
         ),
     }
 
@@ -482,43 +762,89 @@ def _best_channel(reactions: list[dict[str, Any]]) -> str:
     return max(counts, key=counts.get) if counts else "unknown"
 
 
-def _next_action(decision: str) -> str:
+def _next_action(
+    decision: str,
+    best_channel: str,
+    top_objection: str,
+    *,
+    polish: bool,
+) -> str:
+    if polish:
+        if decision == "publish":
+            return f"Opublikuj na {best_channel}, ale zostaw widoczną odpowiedź na obiekcję: {top_objection}"
+        if decision == "rewrite":
+            return f"Przepisz pod wartość dla odbiorcy, nie pod frameworki, zaczynając od obiekcji: {top_objection}"
+        if decision == "narrow":
+            return f"Zacznij od {best_channel}: zawęź do jednej tezy, dodaj konkretny przykład z rezultatami i odpowiedz na obiekcję: {top_objection}"
+        if decision == "abandon":
+            return f"Odłóż temat, chyba że znajdziesz dowód odpowiadający na obiekcję: {top_objection}"
+        return f"Zadaj ostrzejsze pytanie przed wyborem kanału; najmocniejsza obiekcja to: {top_objection}"
+
     if decision == "publish":
-        return "Draft the strongest version and keep the top objections visible."
+        return f"Draft the strongest {best_channel} version and answer the top objection: {top_objection}"
     if decision == "rewrite":
-        return "Rewrite the idea around the clearest audience value, not the tooling."
+        return f"Rewrite around audience value instead of tooling, starting with this objection: {top_objection}"
     if decision == "narrow":
-        return "Narrow the question and test one sharper angle next."
+        return f"Start with {best_channel}: narrow to one claim, add one evidence-backed example, and answer: {top_objection}"
     if decision == "abandon":
-        return "Park this idea unless new evidence appears."
-    return "Ask a better question before choosing a channel."
+        return f"Park this idea unless you find evidence that answers: {top_objection}"
+    return f"Ask a sharper question before choosing a channel; strongest objection: {top_objection}"
+
+
+def _recommendation_rationale(
+    decision: str,
+    skeptical: int,
+    high_objections: int,
+    question_driven: bool,
+    top_objection: str,
+    *,
+    polish: bool,
+) -> str:
+    if polish:
+        drivers = []
+        if question_driven:
+            drivers.append("temat jest jeszcze szerokim pytaniem")
+        if skeptical:
+            drivers.append(f"{skeptical} reakcji wymaga doprecyzowania lub budzi sceptycyzm")
+        if high_objections:
+            drivers.append(f"{high_objections} obiekcji ma wysoką wagę")
+        driver_text = ", ".join(drivers) if drivers else "panel nie widzi dużego ryzyka"
+        return f"Decyzja {decision}: {driver_text}; najmocniejsza obiekcja: {top_objection}"
+
+    drivers = []
+    if question_driven:
+        drivers.append("the topic is still framed as a broad question")
+    if skeptical:
+        drivers.append(f"{skeptical} reactions are skeptical or need translation")
+    if high_objections:
+        drivers.append(f"{high_objections} objections are high severity")
+    driver_text = ", ".join(drivers) if drivers else "the panel sees low delivery risk"
+    return f"Decision {decision}: {driver_text}; strongest objection: {top_objection}"
+
+
+def _representative_objection(objections: list[dict[str, Any]]) -> str:
+    if not objections:
+        return "No strong objection was captured."
+    preferred = [objection for objection in objections if objection.get("severity") == "high"]
+    text = str((preferred or objections)[0].get("text") or "").strip()
+    return _truncate_sentence(text or "No strong objection was captured.")
+
+
+def _truncate_sentence(text: str, limit: int = 180) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[: limit - 1].rstrip()}..."
+
+
+def _is_likely_polish(text: str) -> bool:
+    normalized = f" {text.lower()} "
+    markers = (" czy ", " czego ", " wydaje ", " wazne ", " ważne ", " rezultat", " dostarcz")
+    return any(marker in normalized for marker in markers)
 
 
 def _select_insights(insights: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
     return insights[:limit]
-
-
-def _similarity_edges(
-    topic: dict[str, Any],
-    previous_topics: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    current_terms = set(topic["summary"].lower().split())
-    edges = []
-    for previous in previous_topics:
-        previous_terms = set(str(previous.get("summary", "")).lower().split())
-        if not previous_terms:
-            continue
-        overlap = len(current_terms & previous_terms) / max(len(current_terms), 1)
-        if overlap >= 0.2:
-            edges.append(
-                {
-                    "source_topic_id": topic["id"],
-                    "target_topic_id": previous.get("id"),
-                    "relationship": "similar_to",
-                    "score": round(overlap, 3),
-                }
-            )
-    return edges
 
 
 def _structured_summary(topic: str) -> str:
@@ -542,6 +868,7 @@ def _looks_like_schema_retry(exc: Exception) -> bool:
         or "not support" in text
         or "invalid_json" in text
         or "schema_error" in text
+        or "schema_validation_failed" in text
     )
 
 

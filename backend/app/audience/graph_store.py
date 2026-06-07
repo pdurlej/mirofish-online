@@ -34,8 +34,9 @@ class InMemoryAudienceGraphStore:
     def read_run(self, run_id: str) -> dict[str, Any] | None:
         return self._runs.get(run_id)
 
-    def previous_topics(self) -> list[dict[str, Any]]:
-        return [payload["topic"] for payload in self._runs.values()]
+    def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
+        values = list(self._runs.values())[-limit:]
+        return [_previous_topic_payload(payload) for payload in values]
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
@@ -70,6 +71,8 @@ class Neo4jAudienceGraphStore:
                     t.channel = $channel,
                     t.topic_hash = $topic_hash,
                     t.summary = $summary,
+                    t.cluster_id = $cluster_id,
+                    t.cluster_label = $cluster_label,
                     t.updated_at = $created_at
                 MERGE (r)-[:TESTED_TOPIC]->(t)
                 """,
@@ -89,7 +92,42 @@ class Neo4jAudienceGraphStore:
                 channel=payload["topic"]["channel"],
                 topic_hash=payload["topic"]["topic_hash"],
                 summary=payload["topic"]["summary"],
+                cluster_id=payload["topic"].get("cluster_id"),
+                cluster_label=payload["topic"].get("cluster_label"),
             )
+            cluster_id = payload["topic"].get("cluster_id")
+            cluster_label = payload["topic"].get("cluster_label")
+            if cluster_id and cluster_label:
+                tx.run(
+                    """
+                    MATCH (t:AudienceTopic {topic_id: $topic_id})
+                    MERGE (c:AudienceTopicCluster {cluster_id: $cluster_id})
+                    ON CREATE SET c.label = $cluster_label,
+                                  c.created_at = $created_at
+                    SET c.updated_at = $created_at,
+                        c.label = coalesce(c.label, $cluster_label)
+                    MERGE (t)-[:IN_CLUSTER]->(c)
+                    """,
+                    topic_id=payload["topic"]["id"],
+                    cluster_id=cluster_id,
+                    cluster_label=cluster_label,
+                    created_at=payload["created_at"],
+                )
+                if payload["similarity_edges"]:
+                    best_edge = payload["similarity_edges"][0]
+                    tx.run(
+                        """
+                        MATCH (tgt:AudienceTopic {topic_id: $target_topic_id})
+                        MATCH (c:AudienceTopicCluster {cluster_id: $cluster_id})
+                        WHERE tgt.cluster_id IS NULL
+                        SET tgt.cluster_id = $cluster_id,
+                            tgt.cluster_label = $cluster_label
+                        MERGE (tgt)-[:IN_CLUSTER]->(c)
+                        """,
+                        target_topic_id=best_edge["target_topic_id"],
+                        cluster_id=cluster_id,
+                        cluster_label=cluster_label,
+                    )
             for persona in payload["personas"]:
                 tx.run(
                     """
@@ -183,11 +221,17 @@ class Neo4jAudienceGraphStore:
                     MATCH (src:AudienceTopic {topic_id: $source_topic_id})
                     MATCH (tgt:AudienceTopic {topic_id: $target_topic_id})
                     MERGE (src)-[rel:SIMILAR_TO]->(tgt)
-                    SET rel.score = $score
+                    SET rel.score = $score,
+                        rel.method = $method,
+                        rel.lexical_score = $lexical_score,
+                        rel.semantic_score = $semantic_score
                     """,
                     source_topic_id=edge["source_topic_id"],
                     target_topic_id=edge["target_topic_id"],
                     score=edge["score"],
+                    method=edge.get("method", "lexical"),
+                    lexical_score=edge.get("lexical_score"),
+                    semantic_score=edge.get("semantic_score"),
                 )
 
         with self._storage._driver.session() as session:  # noqa: SLF001
@@ -239,16 +283,22 @@ class Neo4jAudienceGraphStore:
             result = tx.run(
                 """
                 MATCH (t:AudienceTopic)
-                RETURN t.topic_id AS id,
+                OPTIONAL MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t)
+                RETURN r.payload_json AS payload_json,
+                       r.created_at AS created_at,
+                       t.topic_id AS id,
+                       t.topic_hash AS topic_hash,
                        t.summary AS summary,
                        t.title AS title,
-                       t.channel AS channel
+                       t.channel AS channel,
+                       t.cluster_id AS cluster_id,
+                       t.cluster_label AS cluster_label
                 ORDER BY t.updated_at DESC
                 LIMIT $limit
                 """,
                 limit=limit,
             )
-            return [dict(record) for record in result]
+            return [_previous_topic_from_record(dict(record)) for record in result]
 
         with self._storage._driver.session() as session:  # noqa: SLF001
             return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
@@ -260,7 +310,7 @@ class Neo4jAudienceGraphStore:
                 MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t:AudienceTopic)
                 OPTIONAL MATCH (r)-[:HAS_RECOMMENDATION]->(rec:AudienceRecommendation)
                 OPTIONAL MATCH (r)-[:HAS_REACTION]->(reaction:AudienceReaction)
-                OPTIONAL MATCH (t)-[sim:SIMILAR_TO]->()
+                OPTIONAL MATCH (t)-[sim:SIMILAR_TO]->(target:AudienceTopic)
                 RETURN r.run_id AS run_id,
                        r.created_at AS created_at,
                        r.mode AS mode,
@@ -269,17 +319,23 @@ class Neo4jAudienceGraphStore:
                        r.reliability_grade AS reliability_grade,
                        t.title AS title,
                        t.channel AS channel,
+                       t.cluster_label AS cluster_label,
                        rec.decision AS decision,
                        rec.best_channel AS best_channel,
                        rec.next_action AS next_action,
                        count(DISTINCT reaction) AS reaction_count,
-                       count(DISTINCT sim) AS similarity_count
+                       count(DISTINCT sim) AS similarity_count,
+                       collect(DISTINCT {
+                           title: target.title,
+                           score: sim.score,
+                           method: sim.method
+                       }) AS similar_topics
                 ORDER BY r.created_at DESC
                 LIMIT $limit
                 """,
                 limit=limit,
             )
-            return [dict(record) for record in result]
+            return [_neo4j_history_summary(dict(record)) for record in result]
 
         with self._storage._driver.session() as session:  # noqa: SLF001
             return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
@@ -301,18 +357,75 @@ def _write_counts(payload: dict[str, Any]) -> dict[str, Any]:
 def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
     receipt = payload.get("receipt", {})
     recommendation = payload.get("recommendation", {})
+    topic = payload.get("topic", {})
+    similarity_edges = payload.get("similarity_edges", [])
     return {
         "run_id": payload.get("run_id"),
         "created_at": payload.get("created_at"),
         "mode": receipt.get("mode", "unknown"),
-        "title": payload.get("topic", {}).get("title"),
-        "channel": payload.get("topic", {}).get("channel"),
+        "title": topic.get("title"),
+        "channel": topic.get("channel"),
+        "cluster_label": topic.get("cluster_label"),
         "decision": recommendation.get("decision"),
         "best_channel": recommendation.get("best_channel"),
         "next_action": recommendation.get("next_action"),
         "reaction_count": len(payload.get("reactions", [])),
-        "similarity_count": len(payload.get("similarity_edges", [])),
+        "similarity_count": len(similarity_edges),
+        "similar_topics": _similar_topics_from_edges(similarity_edges),
         "total_tokens": receipt.get("usage", {}).get("total_tokens", 0),
         "failure_rate": receipt.get("failure_rate", 0.0),
         "reliability_grade": receipt.get("reliability_grade", "unknown"),
     }
+
+
+def _previous_topic_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    topic = dict(payload.get("topic", {}))
+    topic["created_at"] = payload.get("created_at")
+    topic["reactions"] = payload.get("reactions", [])
+    topic["objections"] = payload.get("objections", [])
+    return topic
+
+
+def _previous_topic_from_record(record: dict[str, Any]) -> dict[str, Any]:
+    payload_json = record.get("payload_json")
+    if payload_json:
+        try:
+            return _previous_topic_payload(json.loads(payload_json))
+        except json.JSONDecodeError:
+            pass
+    return {
+        "id": record.get("id"),
+        "topic_hash": record.get("topic_hash"),
+        "summary": record.get("summary"),
+        "title": record.get("title"),
+        "channel": record.get("channel"),
+        "cluster_id": record.get("cluster_id"),
+        "cluster_label": record.get("cluster_label"),
+        "created_at": record.get("created_at"),
+        "reactions": [],
+        "objections": [],
+    }
+
+
+def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    topics = [
+        {
+            "title": edge.get("target_title") or edge.get("target_topic_id"),
+            "score": edge.get("score"),
+            "method": edge.get("method", "lexical"),
+        }
+        for edge in edges
+        if edge.get("target_title") or edge.get("target_topic_id")
+    ]
+    return topics[:5]
+
+
+def _neo4j_history_summary(record: dict[str, Any]) -> dict[str, Any]:
+    similar_topics = [
+        topic
+        for topic in record.get("similar_topics", [])
+        if topic.get("title")
+    ]
+    similar_topics.sort(key=lambda topic: topic.get("score") or 0, reverse=True)
+    record["similar_topics"] = similar_topics[:5]
+    return record

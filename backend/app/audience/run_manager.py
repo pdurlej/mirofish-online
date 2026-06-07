@@ -102,19 +102,26 @@ class AudienceRunManager:
                         }
                     )
             except AudienceRunFailed as exc:
-                self._mark_failed(run_id, type(exc).__name__)
+                self._mark_failed(run_id, type(exc).__name__, diagnostics=exc.diagnostics())
             except Exception as exc:  # noqa: BLE001
                 self._mark_failed(run_id, type(exc).__name__)
 
-    def _mark_failed(self, run_id: str, error_kind: str) -> None:
+    def _mark_failed(
+        self,
+        run_id: str,
+        error_kind: str,
+        *,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
+        update = {
+            "status": "failed",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "error_kind": error_kind,
+        }
+        if diagnostics:
+            update["diagnostics"] = diagnostics
         with self._lock:
-            self._records[run_id].update(
-                {
-                    "status": "failed",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "error_kind": error_kind,
-                }
-            )
+            self._records[run_id].update(update)
 
 
 def live_run_id(run_input: AudienceRunInput) -> str:

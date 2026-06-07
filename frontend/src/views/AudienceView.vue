@@ -82,22 +82,22 @@
 
           <div v-else>
             <div class="decision-card">
-              <span class="decision-pill">{{ result.recommendation.decision }}</span>
-              <h2>{{ result.recommendation.next_action }}</h2>
-              <p>{{ result.recommendation.rationale }}</p>
+              <span class="decision-pill">{{ recommendation.decision || 'unknown' }}</span>
+              <h2>{{ recommendation.next_action || 'No next action recorded.' }}</h2>
+              <p>{{ recommendation.rationale || 'No rationale recorded.' }}</p>
             </div>
 
             <div class="metric-row">
               <div>
-                <strong>{{ result.reactions.length }}</strong>
+                <strong>{{ reactions.length }}</strong>
                 <span>reactions</span>
               </div>
               <div>
-                <strong>{{ result.objections.length }}</strong>
+                <strong>{{ objections.length }}</strong>
                 <span>objections</span>
               </div>
               <div>
-                <strong>{{ result.similarity_edges.length }}</strong>
+                <strong>{{ similarityEdges.length }}</strong>
                 <span>similar topics</span>
               </div>
               <div>
@@ -114,6 +114,22 @@
               </div>
             </div>
 
+            <div class="graph-context">
+              <div>
+                <span>Cluster</span>
+                <strong>{{ result.topic?.cluster_label || result.topic?.title || 'Unclustered' }}</strong>
+              </div>
+              <div v-if="similarityEdges.length">
+                <span>Similar topics</span>
+                <ul class="similar-topic-list">
+                  <li v-for="edge in similarityEdges" :key="edge.target_topic_id">
+                    <strong>{{ edge.target_title || edge.target_topic_id }}</strong>
+                    <span>{{ scoreLabel(edge.score) }} · {{ edge.method || 'lexical' }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
             <h3>Strongest objections</h3>
             <ul class="objection-list">
               <li v-for="item in topObjections" :key="item.id">
@@ -124,9 +140,15 @@
 
             <h3>Model attribution</h3>
             <div class="persona-list">
-              <div v-for="persona in result.personas.slice(0, 10)" :key="persona.id">
+              <div v-for="persona in personas.slice(0, 10)" :key="persona.id">
                 <strong>{{ persona.name }}</strong>
-                <span>{{ persona.model_assignment.model }}</span>
+                <span>{{ persona.model_assignment?.model || 'unknown' }}</span>
+                <small v-if="memoryForPersona(persona.id).related_topic_count">
+                  seen in {{ memoryForPersona(persona.id).related_topic_count }} related topics
+                </small>
+                <small v-if="memoryForPersona(persona.id).last_related_objection">
+                  {{ trimText(memoryForPersona(persona.id).last_related_objection, 120) }}
+                </small>
               </div>
             </div>
           </div>
@@ -152,6 +174,8 @@
             <strong>{{ item.title || item.run_id }}</strong>
             <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
             <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
+            <span v-if="item.cluster_label">Cluster: {{ item.cluster_label }}</span>
+            <span v-if="similarTopicsLabel(item)">Similar: {{ similarTopicsLabel(item) }}</span>
           </button>
         </div>
       </section>
@@ -186,9 +210,18 @@ const form = reactive({
 })
 
 const canSubmit = computed(() => form.topic.trim().length >= 12)
-const topObjections = computed(() => result.value?.objections.slice(0, 6) || [])
+const recommendation = computed(() => result.value?.recommendation || {})
+const reactions = computed(() => result.value?.reactions || [])
+const objections = computed(() => result.value?.objections || [])
+const personas = computed(() => result.value?.personas || [])
+const topObjections = computed(() => objections.value.slice(0, 6))
 const receipt = computed(() => result.value?.receipt || {})
 const reliabilityLabel = computed(() => receipt.value.reliability_grade || 'unknown')
+const similarityEdges = computed(() => result.value?.similarity_edges || [])
+const personaMemoryById = computed(() => {
+  const pairs = (result.value?.persona_memory || []).map((item) => [item.persona_id, item])
+  return new Map(pairs)
+})
 const buttonLabel = computed(() => {
   if (loading.value) return runMode.value === 'live' ? 'Running live audience...' : 'Running test...'
   return runMode.value === 'live' ? 'Run live audience' : 'Run test contract'
@@ -275,6 +308,27 @@ const loadRun = async (runId) => {
   } finally {
     loading.value = false
   }
+}
+
+const memoryForPersona = (personaId) => personaMemoryById.value.get(personaId) || {}
+
+const scoreLabel = (score) => {
+  const numeric = Number(score)
+  if (!Number.isFinite(numeric)) return 'n/a'
+  return numeric.toFixed(2)
+}
+
+const similarTopicsLabel = (item) => {
+  return (item.similar_topics || [])
+    .slice(0, 2)
+    .map((topic) => `${topic.title} (${scoreLabel(topic.score)} ${topic.method || 'lexical'})`)
+    .join(', ')
+}
+
+const trimText = (text, limit) => {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim()
+  if (cleaned.length <= limit) return cleaned
+  return `${cleaned.slice(0, limit - 1).trim()}...`
 }
 </script>
 
@@ -512,6 +566,41 @@ button {
   margin-right: 8px;
 }
 
+.graph-context {
+  border: 1px solid #e2ddd2;
+  padding: 14px;
+  margin-bottom: 24px;
+}
+
+.graph-context > div + div {
+  margin-top: 14px;
+}
+
+.graph-context span {
+  display: block;
+  color: #666;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+}
+
+.graph-context strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.similar-topic-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.similar-topic-list li {
+  border-top: 1px solid #eee8dc;
+  padding-top: 8px;
+}
+
 .persona-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -524,14 +613,21 @@ button {
 }
 
 .persona-list strong,
-.persona-list span {
+.persona-list span,
+.persona-list small {
   display: block;
 }
 
-.persona-list span {
+.persona-list span,
+.persona-list small {
   color: #666;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.78rem;
+}
+
+.persona-list small {
+  margin-top: 6px;
+  line-height: 1.35;
 }
 
 .history-panel {
