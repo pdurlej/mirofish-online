@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 LEXICAL_THRESHOLD = 0.20
 SEMANTIC_THRESHOLD = 0.68
+SEMANTIC_ONLY_LEXICAL_FLOOR = 0.08
 MAX_SIMILARITY_EDGES = 5
 
 
@@ -152,12 +153,17 @@ def build_similarity_edges(
     for index, previous in enumerate(candidates):
         lexical_score = _lexical_score(topic, previous)
         semantic_score = semantic_scores[index] if semantic_scores else None
+        semantic_match = _semantic_match_allowed(
+            topic,
+            previous,
+            lexical_score,
+            semantic_score,
+            semantic_threshold,
+        )
         score = max(lexical_score, semantic_score or 0.0)
-        if lexical_score < lexical_threshold and (
-            semantic_score is None or semantic_score < semantic_threshold
-        ):
+        if lexical_score < lexical_threshold and not semantic_match:
             continue
-        method = _similarity_method(lexical_score, semantic_score, lexical_threshold, semantic_threshold)
+        method = _similarity_method(lexical_score, semantic_match, lexical_threshold)
         edges.append(
             {
                 "source_topic_id": topic["id"],
@@ -308,12 +314,10 @@ def _cosine(left: list[float], right: list[float]) -> float:
 
 def _similarity_method(
     lexical_score: float,
-    semantic_score: float | None,
+    semantic_match: bool,
     lexical_threshold: float,
-    semantic_threshold: float,
 ) -> str:
     lexical_match = lexical_score >= lexical_threshold
-    semantic_match = semantic_score is not None and semantic_score >= semantic_threshold
     if lexical_match and semantic_match:
         return "hybrid"
     if semantic_match:
@@ -328,7 +332,31 @@ def _is_self_topic(current: dict[str, Any], previous: dict[str, Any]) -> bool:
         return True
     current_hash = current.get("topic_hash")
     previous_hash = previous.get("topic_hash")
-    return bool(current_hash and previous_hash and current_hash == previous_hash)
+    if current_hash and previous_hash and current_hash == previous_hash:
+        return True
+    current_title = _normalized_title(current)
+    previous_title = _normalized_title(previous)
+    return bool(current_title and previous_title and current_title == previous_title)
+
+
+def _semantic_match_allowed(
+    current: dict[str, Any],
+    previous: dict[str, Any],
+    lexical_score: float,
+    semantic_score: float | None,
+    semantic_threshold: float,
+) -> bool:
+    if semantic_score is None or semantic_score < semantic_threshold:
+        return False
+    if lexical_score >= SEMANTIC_ONLY_LEXICAL_FLOOR:
+        return True
+    current_concepts = set(_concept_tokens(topic_similarity_text(current)))
+    previous_concepts = set(_concept_tokens(topic_similarity_text(previous)))
+    return bool(current_concepts & previous_concepts)
+
+
+def _normalized_title(topic: dict[str, Any]) -> str:
+    return " ".join(_tokens(str(topic.get("title") or "")))
 
 
 def _cluster_id(seed: str) -> str:
