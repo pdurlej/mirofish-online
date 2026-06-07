@@ -293,7 +293,7 @@ def test_similarity_ignores_batch_boilerplate_and_broad_pm_overlap_for_controls(
     ai_previous = {
         "id": "topic-ai-builder",
         "topic_hash": "ai-builder",
-        "title": "Repair E2E AI workflow builder",
+        "title": "Repair E2E AI workflow builder 20260607155649",
         "summary": "PM w Polsce uzywa AI do szybkiego prototypu zamiast kolejnego briefu.",
         "channel": "linkedin",
         "cluster_id": "cluster-ai",
@@ -302,7 +302,7 @@ def test_similarity_ignores_batch_boilerplate_and_broad_pm_overlap_for_controls(
     control = {
         "id": "topic-eudi-control",
         "topic_hash": "eudi-control",
-        "title": "Repair E2E EUDI wallet onboarding",
+        "title": "Repair E2E EUDI wallet onboarding 20260607155649",
         "summary": "EUDI Wallet i cyfrowa tozsamosc jako onboarding: co musi zrozumiec PM.",
         "channel": "product-idea",
     }

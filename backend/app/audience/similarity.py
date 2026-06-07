@@ -291,7 +291,7 @@ def _tokens(text: str) -> list[str]:
     return [
         token
         for token in re.sub(r"[^a-z0-9]+", " ", normalized).split()
-        if len(token) >= 2 and token not in STOPWORDS
+        if len(token) >= 2 and not token.isdigit() and token not in STOPWORDS
     ]
 
 
