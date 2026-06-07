@@ -1,50 +1,68 @@
 <template>
   <div class="audience-page">
-    <nav class="audience-nav">
-      <div class="nav-actions">
-        <button class="ghost-button" @click="router.push('/')">← Home</button>
-        <button class="ghost-button" @click="router.push('/audience/graph')">Graph</button>
+    <nav class="site-nav">
+      <button class="brand-button" type="button" @click="router.push('/audience')">
+        <span class="brand-mark"><img :src="brandMark" alt="MiroFish" /></span>
+        <span class="brand-copy">
+          <strong>MiroFish</strong>
+          <span>Audience Lab</span>
+        </span>
+      </button>
+
+      <div class="nav-links">
+        <button class="nav-link" type="button" @click="router.push('/')">Home</button>
+        <button class="nav-link accent" type="button" @click="router.push('/audience/graph')">Graph</button>
       </div>
-      <span>Private Audience Graph</span>
     </nav>
 
     <main class="audience-shell">
       <section class="audience-hero">
-        <div>
-          <p class="eyebrow">Piotr Durlej / Content and Product Thinking</p>
-          <h1>Test a topic against a 20-person synthetic audience.</h1>
-          <p class="hero-copy">
-            A private, Tailnet-first audience graph for podcast, LinkedIn, blog,
-            Twitter/X and product ideas. It uses local graph memory with cloud
-            models, then records token usage and reliability so the system can
-            earn its keep instead of becoming a shiny cost trap.
+        <div class="hero-copy">
+          <p class="eyebrow">Synthetic reviewer run</p>
+          <h1>Pressure-test a topic against the same audience every time.</h1>
+          <p>
+            Use live personas for content, product, startup, and positioning
+            questions. The run records objections, channel fit, similarity,
+            reliability, cost, and the next useful move.
           </p>
         </div>
-        <div class="status-panel">
-          <div class="status-number">{{ personaCount }}</div>
-          <div class="status-label">active personas</div>
-          <div class="status-note">{{ runMode === 'live' ? 'live model run' : 'fake contract run' }}</div>
-        </div>
+
+        <aside class="status-panel">
+          <div class="status-ring">
+            <strong>{{ personaCount }}</strong>
+            <span>personas</span>
+          </div>
+          <div class="status-copy">
+            <span class="live-dot"></span>
+            <span>{{ runMode === 'live' ? 'live model path' : 'contract test path' }}</span>
+          </div>
+        </aside>
       </section>
 
       <section class="audience-grid">
         <form class="run-panel" @submit.prevent="submitRun">
-          <div class="mode-toggle">
-            <button type="button" :class="{ active: runMode === 'live' }" @click="runMode = 'live'">
-              Live
-            </button>
-            <button type="button" :class="{ active: runMode === 'fake' }" @click="runMode = 'fake'">
-              Test
-            </button>
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Run setup</p>
+              <h2>New topic</h2>
+            </div>
+            <div class="mode-toggle" role="group" aria-label="Run mode">
+              <button type="button" :class="{ active: runMode === 'live' }" @click="runMode = 'live'">
+                Live
+              </button>
+              <button type="button" :class="{ active: runMode === 'fake' }" @click="runMode = 'fake'">
+                Test
+              </button>
+            </div>
           </div>
 
           <label>
-            Title
-            <input v-model="form.title" type="text" placeholder="AI harnesses for PMs" />
+            <span>Title</span>
+            <input v-model="form.title" type="text" placeholder="AI workflows for PM teams" />
           </label>
 
           <label>
-            Channel
+            <span>Channel</span>
             <select v-model="form.channel">
               <option value="unknown">Unknown</option>
               <option value="podcast">Podcast</option>
@@ -56,11 +74,11 @@
           </label>
 
           <label>
-            Topic or rough note
+            <span>Topic or rough note</span>
             <textarea
               v-model="form.topic"
               rows="10"
-              placeholder="Paste a podcast idea, LinkedIn angle, blog thesis, or product question..."
+              placeholder="Paste a thesis, angle, question, or rough post draft..."
             />
           </label>
 
@@ -75,17 +93,22 @@
 
         <section class="result-panel">
           <div v-if="!result" class="empty-result">
-            <h2>Waiting for a topic</h2>
+            <div class="empty-orbit">
+              <span></span>
+              <i></i>
+            </div>
+            <h2>Run output lands here.</h2>
             <p>
-              The report will show channel fit, objections, model attribution,
-              similarity to previous topics, token usage, reliability and the
-              recommended next action.
+              You will see decision, objections, similarity edges, token usage,
+              reliability, model attribution, and reviewer memory in one place.
             </p>
           </div>
 
-          <div v-else>
+          <div v-else class="result-stack">
             <div class="decision-card">
-              <span class="decision-pill">{{ recommendation.decision || 'unknown' }}</span>
+              <span class="decision-pill" :class="`decision-${recommendation.decision || 'unknown'}`">
+                {{ recommendation.decision || 'unknown' }}
+              </span>
               <h2>{{ recommendation.next_action || 'No next action recorded.' }}</h2>
               <p>{{ recommendation.rationale || 'No rationale recorded.' }}</p>
             </div>
@@ -101,7 +124,7 @@
               </div>
               <div>
                 <strong>{{ similarityEdges.length }}</strong>
-                <span>similar topics</span>
+                <span>similar</span>
               </div>
               <div>
                 <strong>{{ receipt.usage?.total_tokens || 0 }}</strong>
@@ -118,50 +141,57 @@
             </div>
 
             <div class="graph-context">
-              <div>
+              <div class="context-card">
                 <span>Cluster</span>
                 <strong>{{ result.topic?.cluster_label || result.topic?.title || 'Unclustered' }}</strong>
               </div>
-              <div v-if="similarityEdges.length">
-                <span>Similar topics</span>
+              <div v-if="similarityEdges.length" class="context-card">
+                <span>Top similar topics</span>
                 <ul class="similar-topic-list">
                   <li v-for="edge in similarityEdges" :key="edge.target_topic_id">
                     <strong>{{ edge.target_title || edge.target_topic_id }}</strong>
-                    <span>{{ scoreLabel(edge.score) }} · {{ edge.method || 'lexical' }}</span>
+                    <small>{{ scoreLabel(edge.score) }} · {{ edge.method || 'lexical' }}</small>
                   </li>
                 </ul>
               </div>
             </div>
 
-            <h3>Strongest objections</h3>
-            <ul class="objection-list">
-              <li v-for="item in topObjections" :key="item.id">
-                <span>{{ item.severity }}</span>
-                {{ item.text }}
-              </li>
-            </ul>
+            <section class="result-section">
+              <h3>Strongest objections</h3>
+              <ul class="objection-list">
+                <li v-for="item in topObjections" :key="item.id">
+                  <span>{{ item.severity }}</span>
+                  {{ item.text }}
+                </li>
+              </ul>
+            </section>
 
-            <h3>Model attribution</h3>
-            <div class="persona-list">
-              <div v-for="persona in personas.slice(0, 10)" :key="persona.id">
-                <strong>{{ persona.name }}</strong>
-                <span>{{ persona.model_assignment?.model || 'unknown' }}</span>
-                <small v-if="memoryForPersona(persona.id).related_topic_count">
-                  seen in {{ memoryForPersona(persona.id).related_topic_count }} related topics
-                </small>
-                <small v-if="memoryForPersona(persona.id).last_related_objection">
-                  {{ trimText(memoryForPersona(persona.id).last_related_objection, 120) }}
-                </small>
+            <section class="result-section">
+              <h3>Model attribution</h3>
+              <div class="persona-list">
+                <div v-for="persona in personas.slice(0, 10)" :key="persona.id">
+                  <strong>{{ persona.name }}</strong>
+                  <span>{{ persona.model_assignment?.model || 'unknown' }}</span>
+                  <small v-if="memoryForPersona(persona.id).related_topic_count">
+                    seen in {{ memoryForPersona(persona.id).related_topic_count }} related topics
+                  </small>
+                  <small v-if="memoryForPersona(persona.id).last_related_objection">
+                    {{ trimText(memoryForPersona(persona.id).last_related_objection, 120) }}
+                  </small>
+                </div>
               </div>
-            </div>
+            </section>
           </div>
         </section>
       </section>
 
       <section class="history-panel">
         <div class="section-title">
-          <h2>Previous topics</h2>
-          <button class="small-button" @click="loadHistory">Refresh</button>
+          <div>
+            <p class="eyebrow">Run history</p>
+            <h2>Previous topics</h2>
+          </div>
+          <button class="small-button" type="button" @click="loadHistory">Refresh</button>
         </div>
         <div v-if="history.length === 0" class="history-empty">
           No previous audience runs yet.
@@ -196,6 +226,7 @@ import {
   listAudiencePersonas,
   listAudienceRuns
 } from '../api/audience'
+import brandMark from './audienceGraph/brand-mark.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -342,216 +373,461 @@ const trimText = (text, limit) => {
 <style scoped>
 .audience-page {
   min-height: 100vh;
-  background: #f6f5f1;
-  color: #171717;
-  font-family: 'Space Grotesk', system-ui, sans-serif;
+  color: var(--mf-ink);
+  background:
+    linear-gradient(rgba(67, 205, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(67, 205, 255, 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 18% 0%, rgba(56, 225, 255, 0.15), transparent 32%),
+    radial-gradient(circle at 92% 24%, rgba(167, 139, 250, 0.16), transparent 30%),
+    var(--mf-bg);
+  background-size: 44px 44px, 44px 44px, auto, auto, auto;
 }
 
-.audience-nav {
-  height: 60px;
-  padding: 0 40px;
-  background: #111;
-  color: #fff;
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 72px;
+  padding: 0 clamp(18px, 4vw, 48px);
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-family: 'JetBrains Mono', monospace;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid rgba(132, 184, 209, 0.2);
+  background: rgba(5, 9, 18, 0.78);
+  backdrop-filter: blur(18px);
 }
 
-.nav-actions {
+.brand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(56, 225, 255, 0.34);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 32px rgba(56, 225, 255, 0.14);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brand-copy {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.brand-copy strong {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand-copy span,
+.eyebrow,
+.nav-link,
+.mode-toggle,
+.status-copy,
+.decision-pill,
+.metric-row span,
+.graph-context span,
+.similar-topic-list small,
+.objection-list span,
+.persona-list span,
+.persona-list small {
+  font-family: var(--mf-font-mono);
+}
+
+.brand-copy span {
+  color: var(--mf-ink-faint);
+  font-size: 0.78rem;
+}
+
+.nav-links {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
+.nav-link,
+.small-button {
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 0 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(132, 184, 209, 0.26);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--mf-ink);
+  cursor: pointer;
+}
+
+.nav-link.accent,
+.small-button:hover {
+  border-color: rgba(56, 225, 255, 0.54);
+  background: var(--mf-accent-soft);
+}
+
 .audience-shell {
-  max-width: 1220px;
+  width: min(1220px, calc(100% - 36px));
   margin: 0 auto;
-  padding: 48px 32px 72px;
+  padding: clamp(32px, 5vw, 62px) 0 80px;
 }
 
 .audience-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  gap: 24px;
   align-items: end;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+}
+
+.hero-copy h1 {
+  max-width: 920px;
+  margin: 0;
+  font-size: clamp(2.6rem, 6vw, 5.6rem);
+  line-height: 0.94;
+  letter-spacing: 0;
+}
+
+.hero-copy p:not(.eyebrow) {
+  max-width: 760px;
+  margin: 22px 0 0;
+  color: var(--mf-ink-muted);
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .eyebrow {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.78rem;
+  margin: 0 0 14px;
+  color: var(--mf-accent);
+  font-size: 0.76rem;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #a43a12;
-  margin-bottom: 14px;
-}
-
-h1 {
-  font-size: clamp(2.2rem, 5vw, 4.8rem);
-  line-height: 1.02;
-  max-width: 920px;
-  margin: 0;
-}
-
-.hero-copy {
-  max-width: 760px;
-  color: #555;
-  font-size: 1rem;
-  line-height: 1.7;
-  margin-top: 20px;
 }
 
 .status-panel,
 .run-panel,
 .result-panel,
 .history-panel {
-  border: 1px solid #d9d4c8;
-  background: #fffdf8;
+  border: 1px solid var(--mf-border);
+  background: linear-gradient(180deg, rgba(10, 24, 38, 0.86), rgba(5, 13, 24, 0.86));
+  box-shadow: var(--mf-shadow);
 }
 
-.status-panel,
-.run-panel,
-.result-panel,
-.history-panel {
-  padding: 24px;
+.status-panel {
+  min-height: 220px;
+  border-radius: 24px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
-.status-number {
-  font-size: 4rem;
-  font-weight: 700;
+.status-ring {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  border: 1px solid rgba(56, 225, 255, 0.38);
+  background:
+    radial-gradient(circle, rgba(56, 225, 255, 0.16), transparent 62%),
+    rgba(255, 255, 255, 0.035);
 }
 
-.status-label,
-.status-note {
-  color: #666;
-  font-family: 'JetBrains Mono', monospace;
+.status-ring strong,
+.status-ring span {
+  display: block;
+}
+
+.status-ring strong {
+  font-size: 3.2rem;
+  line-height: 1;
+}
+
+.status-ring span {
+  color: var(--mf-ink-faint);
+  margin-top: 6px;
+}
+
+.status-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--mf-ink-muted);
+  font-size: 0.82rem;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--mf-green);
+  box-shadow: 0 0 18px rgba(102, 242, 167, 0.8);
 }
 
 .audience-grid {
   display: grid;
-  grid-template-columns: 460px minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.run-panel,
+.result-panel,
+.history-panel {
+  border-radius: 24px;
+  padding: 22px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+h2,
+h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  line-height: 1;
+}
+
+h3 {
+  font-size: 1rem;
+  margin-bottom: 12px;
 }
 
 .mode-toggle {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(132, 184, 209, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.mode-toggle button,
-.small-button {
-  border: 1px solid #cbc4b5;
-  background: #fff;
-  padding: 10px 12px;
+.mode-toggle button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mf-ink-muted);
   cursor: pointer;
-  font: inherit;
 }
 
 .mode-toggle button.active {
-  background: #111;
-  color: #fff;
+  color: #03111a;
+  background: var(--mf-accent);
 }
 
 label {
-  display: block;
-  font-weight: 700;
-  margin-bottom: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--mf-ink-muted);
+  margin-bottom: 16px;
 }
 
 input,
 select,
 textarea {
   width: 100%;
-  display: block;
-  margin-top: 8px;
-  border: 1px solid #cbc4b5;
-  background: #fff;
-  padding: 12px;
-  font: inherit;
+  border: 1px solid rgba(132, 184, 209, 0.24);
+  border-radius: 14px;
+  background: rgba(3, 10, 18, 0.62);
+  color: var(--mf-ink);
+  padding: 13px 14px;
+  outline: none;
 }
 
 textarea {
   resize: vertical;
+  line-height: 1.55;
 }
 
-button {
-  font: inherit;
-}
-
-.primary-button,
-.ghost-button {
-  cursor: pointer;
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 3px rgba(56, 225, 255, 0.12);
 }
 
 .primary-button {
   width: 100%;
-  border: 0;
-  background: #111;
-  color: #fff;
-  padding: 16px 18px;
+  min-height: 52px;
+  border: 1px solid rgba(56, 225, 255, 0.54);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(56, 225, 255, 0.28), rgba(87, 121, 255, 0.2));
+  color: var(--mf-ink);
+  padding: 0 18px;
   font-weight: 800;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
 }
 
 .primary-button:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.ghost-button {
-  border: 1px solid #444;
-  color: #fff;
-  background: transparent;
-  padding: 8px 12px;
+  opacity: 0.48;
 }
 
 .status-text {
-  color: #555;
+  color: var(--mf-ink-muted);
   margin-top: 14px;
 }
 
 .error-text {
-  color: #b42318;
+  color: var(--mf-red);
   margin-top: 14px;
 }
 
+.result-panel {
+  min-height: 640px;
+}
+
 .empty-result {
-  min-height: 360px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  color: #555;
+  min-height: 560px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--mf-ink-muted);
+}
+
+.empty-result h2 {
+  color: var(--mf-ink);
+  margin-top: 24px;
+}
+
+.empty-result p {
+  max-width: 520px;
+  margin: 14px auto 0;
+  line-height: 1.65;
+}
+
+.empty-orbit {
+  width: 168px;
+  height: 168px;
+  margin: 0 auto;
+  border-radius: 50%;
+  position: relative;
+  border: 1px dashed rgba(56, 225, 255, 0.32);
+}
+
+.empty-orbit span,
+.empty-orbit i {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.empty-orbit span {
+  inset: 42px;
+  border: 1px solid rgba(56, 225, 255, 0.26);
+}
+
+.empty-orbit i {
+  width: 13px;
+  height: 13px;
+  top: 24px;
+  right: 34px;
+  background: var(--mf-accent);
+  box-shadow: 0 0 24px rgba(56, 225, 255, 0.8);
+}
+
+.result-stack {
+  display: grid;
+  gap: 20px;
 }
 
 .decision-card {
-  border-left: 4px solid #ff4500;
-  padding-left: 18px;
-  margin-bottom: 24px;
+  border: 1px solid rgba(132, 184, 209, 0.22);
+  border-radius: 20px;
+  padding: 20px;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(56, 225, 255, 0.14), transparent 34%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.decision-card h2 {
+  margin-top: 14px;
+  line-height: 1.08;
+}
+
+.decision-card p {
+  margin: 12px 0 0;
+  color: var(--mf-ink-muted);
+  line-height: 1.6;
 }
 
 .decision-pill {
-  display: inline-block;
-  background: #111;
-  color: #fff;
-  padding: 4px 8px;
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(56, 225, 255, 0.16);
+  color: var(--mf-accent);
   text-transform: uppercase;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+}
+
+.decision-abandon,
+.decision-drop {
+  background: rgba(255, 122, 144, 0.16);
+  color: var(--mf-red);
+}
+
+.decision-rewrite,
+.decision-narrow,
+.decision-save_for_later {
+  background: rgba(255, 209, 102, 0.16);
+  color: var(--mf-yellow);
+}
+
+.decision-publish,
+.decision-podcast,
+.decision-post {
+  background: rgba(102, 242, 167, 0.16);
+  color: var(--mf-green);
 }
 
 .metric-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 10px;
+}
+
+.metric-row div,
+.context-card,
+.persona-list div {
+  border: 1px solid rgba(132, 184, 209, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .metric-row div {
-  border: 1px solid #e2ddd2;
   padding: 14px;
 }
 
@@ -561,57 +837,74 @@ button {
 }
 
 .metric-row strong {
-  font-size: 1.45rem;
+  font-size: 1.35rem;
 }
 
-.metric-row span {
-  color: #666;
-}
-
-.objection-list {
-  padding-left: 18px;
-  line-height: 1.6;
-}
-
-.objection-list span {
-  font-family: 'JetBrains Mono', monospace;
-  color: #a43a12;
-  margin-right: 8px;
+.metric-row span,
+.graph-context span {
+  color: var(--mf-ink-faint);
+  font-size: 0.76rem;
+  margin-top: 4px;
 }
 
 .graph-context {
-  border: 1px solid #e2ddd2;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.context-card {
   padding: 14px;
-  margin-bottom: 24px;
 }
 
-.graph-context > div + div {
-  margin-top: 14px;
-}
-
-.graph-context span {
+.context-card strong {
   display: block;
-  color: #666;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.78rem;
-}
-
-.graph-context strong {
-  display: block;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .similar-topic-list {
   list-style: none;
   padding: 0;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   display: grid;
   gap: 8px;
 }
 
 .similar-topic-list li {
-  border-top: 1px solid #eee8dc;
+  border-top: 1px solid rgba(132, 184, 209, 0.14);
   padding-top: 8px;
+}
+
+.similar-topic-list small {
+  display: block;
+  margin-top: 4px;
+  color: var(--mf-accent);
+}
+
+.result-section {
+  display: grid;
+  gap: 8px;
+}
+
+.objection-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.objection-list li {
+  border-left: 2px solid rgba(56, 225, 255, 0.42);
+  padding: 2px 0 2px 12px;
+  color: var(--mf-ink-muted);
+  line-height: 1.55;
+}
+
+.objection-list span {
+  color: var(--mf-accent);
+  margin-right: 8px;
+  font-size: 0.76rem;
 }
 
 .persona-list {
@@ -621,7 +914,6 @@ button {
 }
 
 .persona-list div {
-  border: 1px solid #e2ddd2;
   padding: 12px;
 }
 
@@ -633,9 +925,8 @@ button {
 
 .persona-list span,
 .persona-list small {
-  color: #666;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.78rem;
+  color: var(--mf-ink-faint);
+  font-size: 0.76rem;
 }
 
 .persona-list small {
@@ -644,7 +935,7 @@ button {
 }
 
 .history-panel {
-  margin-top: 28px;
+  margin-top: 22px;
 }
 
 .section-title {
@@ -652,6 +943,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
+  margin-bottom: 18px;
 }
 
 .history-list {
@@ -662,10 +954,16 @@ button {
 
 .history-item {
   text-align: left;
-  border: 1px solid #e2ddd2;
-  background: #fff;
+  border: 1px solid rgba(132, 184, 209, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--mf-ink);
   padding: 14px;
   cursor: pointer;
+}
+
+.history-item:hover {
+  border-color: rgba(56, 225, 255, 0.48);
 }
 
 .history-item strong,
@@ -673,24 +971,78 @@ button {
   display: block;
 }
 
+.history-item strong {
+  overflow-wrap: anywhere;
+}
+
 .history-item span {
-  color: #666;
+  color: var(--mf-ink-faint);
   margin-top: 6px;
+  line-height: 1.35;
 }
 
 .history-empty {
-  color: #666;
+  color: var(--mf-ink-muted);
 }
 
-@media (max-width: 880px) {
+@media (max-width: 960px) {
   .audience-hero,
   .audience-grid,
   .history-list {
     grid-template-columns: 1fr;
   }
 
-  .metric-row {
-    grid-template-columns: repeat(2, 1fr);
+  .status-panel {
+    min-height: auto;
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .site-nav {
+    height: auto;
+    padding: 12px 14px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nav-links {
+    width: 100%;
+  }
+
+  .nav-link {
+    flex: 1;
+  }
+
+  .audience-shell {
+    width: min(100% - 24px, 1220px);
+    padding-top: 28px;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(2.35rem, 14vw, 3.7rem);
+  }
+
+  .panel-head,
+  .status-panel,
+  .section-title {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mode-toggle,
+  .metric-row,
+  .persona-list {
+    grid-template-columns: 1fr;
+  }
+
+  .run-panel,
+  .result-panel,
+  .history-panel,
+  .status-panel {
+    border-radius: 18px;
+    padding: 18px;
   }
 }
 </style>
