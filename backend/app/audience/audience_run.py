@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .channel_fit import build_channel_scores, top_channel
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
 from .similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
@@ -124,9 +125,18 @@ def build_fake_audience_run(
         )
 
     insights.extend(_insights_for(run_input, active_personas))
+    channel_scores = build_channel_scores(
+        topic_text=run_input.topic,
+        title=run_input.display_title,
+        requested_channel=run_input.channel,
+        personas=[persona.to_dict() for persona in active_personas],
+        reactions=reactions,
+        objections=objections,
+    )
     recommendation = {
         "decision": _recommendation_for(run_input, active_personas),
-        "best_channel": _best_channel_for(run_input, active_personas),
+        "best_channel": top_channel(channel_scores),
+        "channel_scores": channel_scores,
         "next_action": _next_action_for(run_input),
         "rationale": (
             "Fake deterministic run: use this contract to validate graph/UI flow "

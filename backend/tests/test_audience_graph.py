@@ -23,6 +23,7 @@ from app.audience.live_runner import (
     _recommendation_for,
     _reasoning_effort_for_model,
 )
+from app.audience.channel_fit import build_channel_scores, top_channel
 from app.audience.similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
 from app.storage.embedding_service import EmbeddingError
 from app.utils.llm_client import LLMChatResult
@@ -106,8 +107,32 @@ def test_fake_audience_run_has_20_reactions_and_next_action():
         "ask_better_question",
     }
     assert result.recommendation["best_channel"]
+    assert len(result.recommendation["channel_scores"]) == 5
+    assert result.recommendation["channel_scores"][0]["score"] >= result.recommendation["channel_scores"][-1]["score"]
+    assert result.recommendation["best_channel"] == top_channel(result.recommendation["channel_scores"])
     assert result.recommendation["next_action"]
     assert all("model_assignment" in persona for persona in result.personas)
+
+
+def test_channel_scores_rank_requested_practical_channel():
+    scores = build_channel_scores(
+        topic_text=(
+            "Kontrowersyjny LinkedIn post dla product managerow o tym, "
+            "czemu agile frameworki przegrywaja z rezultatami."
+        ),
+        title="Agile kontra rezultaty",
+        requested_channel="linkedin",
+        reactions=[
+            {"channel_fit": "linkedin strong"},
+            {"channel_fit": "linkedin strong"},
+            {"channel_fit": "blog medium"},
+        ],
+        objections=[{"severity": "medium"}],
+    )
+
+    assert scores[0]["channel"] == "linkedin"
+    assert scores[0]["score"] >= 70
+    assert scores[0]["suggested_format"]
 
 
 def test_in_memory_graph_detects_previous_topic_similarity():
@@ -132,12 +157,14 @@ def test_in_memory_graph_detects_previous_topic_similarity():
     assert counts["similarity_edges"] >= 1
     assert second.similarity_edges[0]["target_title"] == first.topic["title"]
     assert second.similarity_edges[0]["method"] in {"lexical", "hybrid", "semantic"}
+    assert second.similarity_edges[0]["explanation"].startswith("Connected by")
     assert store.read_run(second.run_id)["topic"]["topic_hash"] == second.topic["topic_hash"]
     history = store.list_runs()
     assert history[0]["run_id"] == second.run_id
     assert history[0]["reaction_count"] == 20
     assert history[0]["cluster_label"]
     assert history[0]["similar_topics"][0]["title"] == first.topic["title"]
+    assert history[0]["similar_topics"][0]["explanation"]
 
 
 def test_similarity_blocks_self_loop_for_same_topic_hash():
@@ -599,6 +626,8 @@ def test_live_recommendation_uses_channel_and_objection_for_polish_next_action()
 
     assert recommendation["decision"] == "narrow"
     assert recommendation["best_channel"] == "linkedin"
+    assert recommendation["channel_scores"][0]["channel"] == "linkedin"
+    assert recommendation["channel_scores"][0]["score"] >= 50
     assert "Zacznij od linkedin" in recommendation["next_action"]
     assert "Brakuje dowodów" in recommendation["next_action"]
     assert "szerokim pytaniem" in recommendation["rationale"]

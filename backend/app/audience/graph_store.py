@@ -6,6 +6,7 @@ import json
 from typing import Any, Protocol
 
 from .audience_run import AudienceRunResult
+from .channel_fit import build_channel_scores, enrich_payload_channel_scores
 
 
 class AudienceGraphStore(Protocol):
@@ -41,7 +42,8 @@ class InMemoryAudienceGraphStore:
         return _write_counts(payload)
 
     def read_run(self, run_id: str) -> dict[str, Any] | None:
-        return self._runs.get(run_id)
+        payload = self._runs.get(run_id)
+        return enrich_payload_channel_scores(payload) if payload else None
 
     def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
@@ -49,7 +51,7 @@ class InMemoryAudienceGraphStore:
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
-        return [_history_summary(payload) for payload in reversed(values)]
+        return [_history_summary(enrich_payload_channel_scores(payload)) for payload in reversed(values)]
 
     def graph_snapshot(
         self,
@@ -247,7 +249,8 @@ class Neo4jAudienceGraphStore:
                     SET rel.score = $score,
                         rel.method = $method,
                         rel.lexical_score = $lexical_score,
-                        rel.semantic_score = $semantic_score
+                        rel.semantic_score = $semantic_score,
+                        rel.explanation = $explanation
                     """,
                     source_topic_id=edge["source_topic_id"],
                     target_topic_id=edge["target_topic_id"],
@@ -255,6 +258,7 @@ class Neo4jAudienceGraphStore:
                     method=edge.get("method", "lexical"),
                     lexical_score=edge.get("lexical_score"),
                     semantic_score=edge.get("semantic_score"),
+                    explanation=edge.get("explanation"),
                 )
 
         with self._storage._driver.session() as session:  # noqa: SLF001
@@ -273,7 +277,7 @@ class Neo4jAudienceGraphStore:
             )
             record = result.single()
             if record and record["payload_json"]:
-                return json.loads(record["payload_json"])
+                return enrich_payload_channel_scores(json.loads(record["payload_json"]))
 
             result = tx.run(
                 """
@@ -351,7 +355,8 @@ class Neo4jAudienceGraphStore:
                        collect(DISTINCT {
                            title: target.title,
                            score: sim.score,
-                           method: sim.method
+                           method: sim.method,
+                           explanation: sim.explanation
                        }) AS similar_topics
                 ORDER BY r.created_at DESC
                 LIMIT $limit
@@ -406,7 +411,8 @@ class Neo4jAudienceGraphStore:
                     score: sim.score,
                     method: sim.method,
                     lexical_score: sim.lexical_score,
-                    semantic_score: sim.semantic_score
+                    semantic_score: sim.semantic_score,
+                    explanation: sim.explanation
                 }) AS similarity_edges
                 RETURN topic_rows AS topic_rows,
                        [edge IN similarity_edges WHERE edge.target_topic_id IS NOT NULL] AS similarity_edges
@@ -587,6 +593,7 @@ def _graph_snapshot_from_rows(
             "method": edge.get("method") or "lexical",
             "lexical_score": _nullable_float(edge.get("lexical_score")),
             "semantic_score": _nullable_float(edge.get("semantic_score")),
+            "explanation": edge.get("explanation") or _fallback_edge_explanation(edge),
         }
         edges.append(graph_edge)
         source_node = nodes.get(source_node_id)
@@ -597,6 +604,7 @@ def _graph_snapshot_from_rows(
                     "title": target_node.get("title"),
                     "score": graph_edge["score"],
                     "method": graph_edge["method"],
+                    "explanation": graph_edge["explanation"],
                 }
             )
 
@@ -652,7 +660,16 @@ def _nullable_float(value: Any) -> float | None:
     return round(_safe_float(value), 3)
 
 
+def _fallback_edge_explanation(edge: dict[str, Any]) -> str:
+    method = edge.get("method") or "lexical"
+    score = edge.get("score")
+    if score is None:
+        return f"Connected by {method} similarity."
+    return f"Connected by {method} similarity with score {_safe_float(score):.2f}."
+
+
 def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = enrich_payload_channel_scores(payload)
     receipt = payload.get("receipt", {})
     recommendation = payload.get("recommendation", {})
     topic = payload.get("topic", {})
@@ -666,6 +683,7 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "cluster_label": topic.get("cluster_label"),
         "decision": recommendation.get("decision"),
         "best_channel": recommendation.get("best_channel"),
+        "channel_scores": recommendation.get("channel_scores", []),
         "next_action": recommendation.get("next_action"),
         "reaction_count": len(payload.get("reactions", [])),
         "similarity_count": len(similarity_edges),
@@ -711,6 +729,7 @@ def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, An
             "title": edge.get("target_title") or edge.get("target_topic_id"),
             "score": edge.get("score"),
             "method": edge.get("method", "lexical"),
+            "explanation": edge.get("explanation") or _fallback_edge_explanation(edge),
         }
         for edge in edges
         if edge.get("target_title") or edge.get("target_topic_id")
@@ -726,4 +745,9 @@ def _neo4j_history_summary(record: dict[str, Any]) -> dict[str, Any]:
     ]
     similar_topics.sort(key=lambda topic: topic.get("score") or 0, reverse=True)
     record["similar_topics"] = similar_topics[:5]
+    record["channel_scores"] = build_channel_scores(
+        topic_text=str(record.get("title") or ""),
+        title=record.get("title"),
+        requested_channel=str(record.get("channel") or "unknown"),
+    )
     return record

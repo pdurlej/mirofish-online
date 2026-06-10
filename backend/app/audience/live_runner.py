@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from ..utils.llm_client import LLMClient, LLMChatResult, validate_json_schema
 from .audience_run import AudienceRunInput, AudienceRunResult
+from .channel_fit import build_channel_scores, top_channel
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
 from .similarity import (
@@ -745,12 +746,20 @@ def _recommendation_for(
         decision = "narrow"
     else:
         decision = "publish"
-    best_channel = run_input.channel if run_input.channel != "unknown" else _best_channel(reactions)
+    channel_scores = build_channel_scores(
+        topic_text=run_input.topic,
+        title=run_input.display_title,
+        requested_channel=run_input.channel,
+        reactions=reactions,
+        objections=objections,
+    )
+    best_channel = top_channel(channel_scores)
     top_objection = _representative_objection(objections)
     polish = _is_likely_polish(run_input.topic)
     return {
         "decision": decision,
         "best_channel": best_channel,
+        "channel_scores": channel_scores,
         "next_action": _next_action(decision, best_channel, top_objection, polish=polish),
         "rationale": _recommendation_rationale(
             decision,
