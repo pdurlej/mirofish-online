@@ -43,7 +43,7 @@ class InMemoryAudienceGraphStore:
 
     def read_run(self, run_id: str) -> dict[str, Any] | None:
         payload = self._runs.get(run_id)
-        return enrich_payload_channel_scores(payload) if payload else None
+        return _enrich_payload_for_read(payload) if payload else None
 
     def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
@@ -51,7 +51,7 @@ class InMemoryAudienceGraphStore:
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
-        return [_history_summary(enrich_payload_channel_scores(payload)) for payload in reversed(values)]
+        return [_history_summary(_enrich_payload_for_read(payload)) for payload in reversed(values)]
 
     def graph_snapshot(
         self,
@@ -277,7 +277,7 @@ class Neo4jAudienceGraphStore:
             )
             record = result.single()
             if record and record["payload_json"]:
-                return enrich_payload_channel_scores(json.loads(record["payload_json"]))
+                return _enrich_payload_for_read(json.loads(record["payload_json"]))
 
             result = tx.run(
                 """
@@ -668,8 +668,15 @@ def _fallback_edge_explanation(edge: dict[str, Any]) -> str:
     return f"Connected by {method} similarity with score {_safe_float(score):.2f}."
 
 
-def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
+def _enrich_payload_for_read(payload: dict[str, Any]) -> dict[str, Any]:
     payload = enrich_payload_channel_scores(payload)
+    for edge in payload.get("similarity_edges") or []:
+        edge["explanation"] = edge.get("explanation") or _fallback_edge_explanation(edge)
+    return payload
+
+
+def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _enrich_payload_for_read(payload)
     receipt = payload.get("receipt", {})
     recommendation = payload.get("recommendation", {})
     topic = payload.get("topic", {})
@@ -739,7 +746,7 @@ def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, An
 
 def _neo4j_history_summary(record: dict[str, Any]) -> dict[str, Any]:
     similar_topics = [
-        topic
+        topic | {"explanation": topic.get("explanation") or _fallback_edge_explanation(topic)}
         for topic in record.get("similar_topics", [])
         if topic.get("title")
     ]

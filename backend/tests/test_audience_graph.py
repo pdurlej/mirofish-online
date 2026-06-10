@@ -158,7 +158,14 @@ def test_in_memory_graph_detects_previous_topic_similarity():
     assert second.similarity_edges[0]["target_title"] == first.topic["title"]
     assert second.similarity_edges[0]["method"] in {"lexical", "hybrid", "semantic"}
     assert second.similarity_edges[0]["explanation"].startswith("Connected by")
+
+    legacy_payload = second.to_dict()
+    legacy_payload["similarity_edges"][0].pop("explanation", None)
+    store._runs[second.run_id] = legacy_payload  # noqa: SLF001
+
     assert store.read_run(second.run_id)["topic"]["topic_hash"] == second.topic["topic_hash"]
+    assert store.read_run(second.run_id)["similarity_edges"][0]["explanation"].startswith("Connected by")
+    legacy_payload["similarity_edges"][0].pop("explanation", None)
     history = store.list_runs()
     assert history[0]["run_id"] == second.run_id
     assert history[0]["reaction_count"] == 20
