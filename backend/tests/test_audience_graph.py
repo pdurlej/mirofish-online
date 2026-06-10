@@ -24,6 +24,7 @@ from app.audience.live_runner import (
     _reasoning_effort_for_model,
 )
 from app.audience.channel_fit import build_channel_scores, top_channel
+from app.audience.research_snapshot import SyntheticResearchDataset, build_snapshot_run
 from app.audience.similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
 from app.storage.embedding_service import EmbeddingError
 from app.utils.llm_client import LLMChatResult
@@ -114,6 +115,111 @@ def test_fake_audience_run_has_20_reactions_and_next_action():
     assert all("model_assignment" in persona for persona in result.personas)
 
 
+def test_synthetic_research_snapshot_builds_standard_run_contract():
+    dataset = _synthetic_research_dataset()
+    candidate = dataset.candidates[0]
+
+    result = build_snapshot_run(dataset, candidate)
+
+    assert result.receipt["mode"] == "synthetic_research_snapshot"
+    assert result.receipt["reliability_grade"] == "green"
+    assert result.topic["title"] == "Koszt bledu AI"
+    assert result.topic["branch"] == "ai-evals"
+    assert len(result.personas) == 2
+    assert len(result.reactions) == 2
+    assert len(result.objections) == 2
+    assert result.recommendation["decision"] in {
+        "publish",
+        "rewrite",
+        "narrow",
+        "abandon",
+    }
+    assert len(result.recommendation["channel_scores"]) == 5
+    assert all("model_assignment" in persona for persona in result.personas)
+    assert all(reaction["model"] == "agy:gemini-3.5-flash-low" for reaction in result.reactions)
+
+
+def test_synthetic_research_snapshot_reuses_similarity_and_memory():
+    dataset = _synthetic_research_dataset()
+    store = InMemoryAudienceGraphStore()
+    first = build_snapshot_run(dataset, dataset.candidates[0])
+    store.write_run(first)
+
+    second = build_snapshot_run(
+        dataset,
+        dataset.candidates[1],
+        previous_topics=store.previous_topics(),
+    )
+
+    assert second.similarity_edges
+    assert second.similarity_edges[0]["target_title"] == first.topic["title"]
+    assert second.topic["cluster_label"] == first.topic["title"]
+    assert any(item["related_topic_count"] == 1 for item in second.persona_memory)
+
+
+def test_synthetic_research_snapshot_keeps_cross_branch_similarity_out_of_cluster():
+    dataset = _synthetic_research_dataset()
+    store = InMemoryAudienceGraphStore()
+    first = build_snapshot_run(dataset, dataset.candidates[0])
+    store.write_run(first)
+    control_candidate = {
+        "id": "T003",
+        "title": "Dobre pytania PM-a",
+        "topic": "Jak PM powinien zadawac dobre pytania o ryzyko produktu?",
+        "channel": "linkedin",
+        "branch": "control-non-ai",
+        "avg_fit": 72,
+        "controversy": 1,
+        "support": 1,
+        "import_reason": "test",
+    }
+    control_dataset = SyntheticResearchDataset(
+        snapshot_id=dataset.snapshot_id,
+        archetypes=dataset.archetypes,
+        topics=[
+            *dataset.topics,
+            {
+                "id": "T003",
+                "title": "Dobre pytania PM-a",
+                "question": "Jak PM powinien zadawac dobre pytania o ryzyko produktu?",
+                "primary_channel": "linkedin",
+                "branch": "control-non-ai",
+            },
+        ],
+        candidates=[*dataset.candidates, control_candidate],
+        responses=[
+            *dataset.responses,
+            {
+                "t": "T003",
+                "a": "A01",
+                "fit": 72,
+                "stance": 1,
+                "ch": "linkedin",
+                "risk": "NONE",
+                "note": "PM risk wording overlaps, but this is not an AI evals branch.",
+            },
+            {
+                "t": "T003",
+                "a": "A02",
+                "fit": 68,
+                "stance": 0,
+                "ch": "blog",
+                "risk": "NONE",
+                "note": "Good product thinking topic, separate from AI launch gates.",
+            },
+        ],
+    )
+
+    control = build_snapshot_run(
+        control_dataset,
+        control_candidate,
+        previous_topics=store.previous_topics(),
+    )
+
+    assert control.similarity_edges
+    assert control.topic["cluster_label"] == "Dobre pytania PM-a"
+
+
 def test_channel_scores_rank_requested_practical_channel():
     scores = build_channel_scores(
         topic_text=(
@@ -133,6 +239,109 @@ def test_channel_scores_rank_requested_practical_channel():
     assert scores[0]["channel"] == "linkedin"
     assert scores[0]["score"] >= 70
     assert scores[0]["suggested_format"]
+
+
+def _synthetic_research_dataset() -> SyntheticResearchDataset:
+    archetypes = [
+        {
+            "id": "A01",
+            "label": "Procurement Skeptic",
+            "pl": "Sceptyk zakupowy",
+            "lens": "cost and risk",
+            "skepticism": 4,
+        },
+        {
+            "id": "A02",
+            "label": "AI Workflow Builder",
+            "pl": "Budowniczy workflow AI",
+            "lens": "AI workflow reliability",
+            "skepticism": 2,
+        },
+    ]
+    topics = [
+        {
+            "id": "T001",
+            "title": "Koszt bledu AI",
+            "question": "Jak PM powinien szacowac koszt blednej odpowiedzi AI?",
+            "primary_channel": "linkedin",
+            "branch": "ai-evals",
+        },
+        {
+            "id": "T002",
+            "title": "Quality gates dla AI launchu",
+            "question": "Jakie quality gates powinny blokowac ryzykowny launch AI?",
+            "primary_channel": "blog",
+            "branch": "ai-evals",
+        },
+    ]
+    responses = [
+        {
+            "t": "T001",
+            "a": "A01",
+            "fit": 74,
+            "stance": 1,
+            "ch": "linkedin",
+            "risk": "COST",
+            "note": "To ma sens, jesli pokazesz koszt pomylki i kto go ponosi.",
+        },
+        {
+            "t": "T001",
+            "a": "A02",
+            "fit": 88,
+            "stance": 2,
+            "ch": "product-idea",
+            "risk": "NONE",
+            "note": "Dobry temat, bo wymusza konkretne progi jakosci dla AI.",
+        },
+        {
+            "t": "T002",
+            "a": "A01",
+            "fit": 76,
+            "stance": 1,
+            "ch": "blog",
+            "risk": "COST",
+            "note": "Quality gate bez kosztu bledu bedzie tylko checklistą.",
+        },
+        {
+            "t": "T002",
+            "a": "A02",
+            "fit": 91,
+            "stance": 2,
+            "ch": "product-idea",
+            "risk": "NONE",
+            "note": "Launch AI potrzebuje mierzalnych gateow i fallbackow.",
+        },
+    ]
+    return SyntheticResearchDataset(
+        snapshot_id="test-snapshot",
+        archetypes=archetypes,
+        topics=topics,
+        candidates=[
+            {
+                "id": "T001",
+                "title": "Koszt bledu AI",
+                "topic": "Jak PM powinien szacowac koszt blednej odpowiedzi AI?",
+                "channel": "linkedin",
+                "branch": "ai-evals",
+                "avg_fit": 81,
+                "controversy": 1,
+                "support": 1,
+                "import_reason": "test",
+            },
+            {
+                "id": "T002",
+                "title": "Quality gates dla AI launchu",
+                "topic": "Jakie quality gates powinny blokowac ryzykowny launch AI?",
+                "channel": "blog",
+                "branch": "ai-evals",
+                "avg_fit": 83,
+                "controversy": 1,
+                "support": 1,
+                "import_reason": "test",
+            },
+        ],
+        responses=responses,
+    )
 
 
 def test_in_memory_graph_detects_previous_topic_similarity():
