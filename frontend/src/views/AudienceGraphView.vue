@@ -222,6 +222,7 @@
                   <span class="sim-main">
                     <span class="sim-title">{{ s.title }}</span>
                     <span class="sim-track"><i :style="{ width: Math.round(s.score * 100) + '%' }"></i></span>
+                    <span v-if="s.explanation" class="sim-explanation">{{ s.explanation }}</span>
                   </span>
                   <span>
                     <span class="sim-score">{{ scoreLabel(s.score) }}</span>
@@ -800,6 +801,7 @@ onBeforeUnmount(() => {
 .sim-title { font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .14s; }
 .sim-track { height:4px; border-radius:3px; background:var(--water-3); margin-top:6px; overflow:hidden; }
 .sim-track > i { height:100%; display:block; background:var(--accent); border-radius:3px; }
+.sim-explanation { display:block; margin-top:5px; color:var(--ink-faint); font-size:10.5px; line-height:1.25; }
 .sim-score { font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-dim); text-align:right; }
 .sim-method { font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
 .member-list { display:flex; flex-direction:column; gap:1px; }

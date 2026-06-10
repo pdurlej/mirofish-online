@@ -113,6 +113,39 @@
               <p>{{ recommendation.rationale || 'No rationale recorded.' }}</p>
             </div>
 
+            <section v-if="channelScores.length" class="channel-fit-card">
+              <div class="channel-fit-head">
+                <div>
+                  <h3>Channel fit</h3>
+                  <p>Where this idea is most likely to work next.</p>
+                </div>
+                <span v-if="topChannel" class="channel-badge">
+                  Recommended: {{ topChannel.label }}
+                </span>
+              </div>
+
+              <div class="channel-score-list">
+                <div
+                  v-for="score in channelScores"
+                  :key="score.channel"
+                  class="channel-score-row"
+                  :class="{ primary: score.channel === topChannel?.channel }"
+                >
+                  <div class="channel-score-top">
+                    <strong>{{ score.label || score.channel }}</strong>
+                    <span>{{ score.score }}%</span>
+                  </div>
+                  <div class="channel-meter" aria-hidden="true">
+                    <i :style="{ width: scoreWidth(score.score) }"></i>
+                  </div>
+                  <div class="channel-score-meta">
+                    <small>{{ score.suggested_format }}</small>
+                    <small>{{ confidenceLabel(score.confidence) }} confidence</small>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <div class="metric-row">
               <div>
                 <strong>{{ reactions.length }}</strong>
@@ -151,6 +184,9 @@
                   <li v-for="edge in similarityEdges" :key="edge.target_topic_id">
                     <strong>{{ edge.target_title || edge.target_topic_id }}</strong>
                     <small>{{ scoreLabel(edge.score) }} · {{ edge.method || 'lexical' }}</small>
+                    <small v-if="edge.explanation" class="similar-explanation">
+                      {{ edge.explanation }}
+                    </small>
                   </li>
                 </ul>
               </div>
@@ -206,6 +242,7 @@
           >
             <strong>{{ item.title || item.run_id }}</strong>
             <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
+            <span v-if="historyChannelLabel(item)">Best: {{ historyChannelLabel(item) }}</span>
             <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
             <span v-if="item.cluster_label">Cluster: {{ item.cluster_label }}</span>
             <span v-if="similarTopicsLabel(item)">Similar: {{ similarTopicsLabel(item) }}</span>
@@ -253,6 +290,17 @@ const topObjections = computed(() => objections.value.slice(0, 6))
 const receipt = computed(() => result.value?.receipt || {})
 const reliabilityLabel = computed(() => receipt.value.reliability_grade || 'unknown')
 const similarityEdges = computed(() => result.value?.similarity_edges || [])
+const channelScores = computed(() => {
+  const scores = recommendation.value?.channel_scores || []
+  return scores
+    .map((item) => ({
+      ...item,
+      score: Math.max(0, Math.min(100, Number(item.score) || 0)),
+      confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0))
+    }))
+    .sort((a, b) => b.score - a.score)
+})
+const topChannel = computed(() => channelScores.value[0] || null)
 const personaMemoryById = computed(() => {
   const pairs = (result.value?.persona_memory || []).map((item) => [item.persona_id, item])
   return new Map(pairs)
@@ -356,11 +404,29 @@ const scoreLabel = (score) => {
   return numeric.toFixed(2)
 }
 
+const scoreWidth = (score) => {
+  const numeric = Math.max(0, Math.min(100, Number(score) || 0))
+  return `${numeric}%`
+}
+
+const confidenceLabel = (confidence) => {
+  const numeric = Number(confidence)
+  if (!Number.isFinite(numeric)) return 'unknown'
+  return `${Math.round(Math.max(0, Math.min(1, numeric)) * 100)}%`
+}
+
 const similarTopicsLabel = (item) => {
   return (item.similar_topics || [])
     .slice(0, 2)
     .map((topic) => `${topic.title} (${scoreLabel(topic.score)} ${topic.method || 'lexical'})`)
     .join(', ')
+}
+
+const historyChannelLabel = (item) => {
+  const scores = [...(item.channel_scores || [])].sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+  const top = scores[0]
+  if (top) return `${top.label || top.channel} ${Number(top.score || 0)}%`
+  return item.best_channel || ''
 }
 
 const trimText = (text, limit) => {
@@ -813,6 +879,98 @@ textarea:focus {
   color: var(--mf-green);
 }
 
+.channel-fit-card {
+  border: 1px solid rgba(132, 184, 209, 0.2);
+  border-radius: 20px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(102, 242, 167, 0.1), transparent 32%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.channel-fit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.channel-fit-head p {
+  margin: 6px 0 0;
+  color: var(--mf-ink-faint);
+}
+
+.channel-badge {
+  flex-shrink: 0;
+  border: 1px solid rgba(56, 225, 255, 0.36);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(56, 225, 255, 0.1);
+  color: var(--mf-accent);
+  font-family: var(--mf-font-mono);
+  font-size: 0.74rem;
+}
+
+.channel-score-list {
+  display: grid;
+  gap: 10px;
+}
+
+.channel-score-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(132, 184, 209, 0.16);
+  border-radius: 16px;
+  background: rgba(3, 10, 18, 0.32);
+}
+
+.channel-score-row.primary {
+  border-color: rgba(56, 225, 255, 0.5);
+  background: rgba(56, 225, 255, 0.07);
+}
+
+.channel-score-top,
+.channel-score-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel-score-top span {
+  color: var(--mf-accent);
+  font-family: var(--mf-font-mono);
+}
+
+.channel-meter {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(132, 184, 209, 0.16);
+}
+
+.channel-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--mf-accent), var(--mf-green));
+  box-shadow: 0 0 18px rgba(56, 225, 255, 0.28);
+}
+
+.channel-score-meta small {
+  color: var(--mf-ink-faint);
+  line-height: 1.35;
+}
+
+.channel-score-meta small:last-child {
+  flex-shrink: 0;
+  color: var(--mf-ink-muted);
+  font-family: var(--mf-font-mono);
+  font-size: 0.72rem;
+}
+
 .metric-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -879,6 +1037,11 @@ textarea:focus {
   display: block;
   margin-top: 4px;
   color: var(--mf-accent);
+}
+
+.similar-topic-list .similar-explanation {
+  color: var(--mf-ink-faint);
+  line-height: 1.35;
 }
 
 .result-section {
@@ -1026,6 +1189,8 @@ textarea:focus {
 
   .panel-head,
   .status-panel,
+  .channel-fit-head,
+  .channel-score-meta,
   .section-title {
     flex-direction: column;
     align-items: stretch;

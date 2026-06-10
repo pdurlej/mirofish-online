@@ -65,6 +65,15 @@ STOPWORDS = {
     "że",
 }
 BROAD_CONCEPTS = {"concept_pm"}
+CONCEPT_LABELS = {
+    "concept_ai": "AI/LLM",
+    "concept_evals": "evals/ROI",
+    "concept_discovery": "discovery/customer insight",
+    "concept_prototype": "prototype/builder workflow",
+    "concept_governance": "AI governance",
+    "concept_pricing": "pricing/packaging",
+    "concept_identity": "digital identity/onboarding",
+}
 
 CONCEPT_PATTERNS = {
     "concept_ai": (
@@ -183,6 +192,13 @@ def build_similarity_edges(
                 "method": method,
                 "lexical_score": round(lexical_score, 3),
                 "semantic_score": round(semantic_score, 3) if semantic_score is not None else None,
+                "explanation": _edge_explanation(
+                    topic,
+                    previous,
+                    method=method,
+                    lexical_score=lexical_score,
+                    semantic_score=semantic_score,
+                ),
             }
         )
     return sorted(edges, key=lambda edge: edge["score"], reverse=True)[:limit]
@@ -363,6 +379,35 @@ def _semantic_match_allowed(
 
 def _specific_concept_tokens(text: str) -> list[str]:
     return [concept for concept in _concept_tokens(text) if concept not in BROAD_CONCEPTS]
+
+
+def _edge_explanation(
+    current: dict[str, Any],
+    previous: dict[str, Any],
+    *,
+    method: str,
+    lexical_score: float,
+    semantic_score: float | None,
+) -> str:
+    current_terms = set(_weighted_terms(current))
+    previous_terms = set(_weighted_terms(previous))
+    shared = sorted(current_terms & previous_terms)
+    concepts = [CONCEPT_LABELS[term] for term in shared if term in CONCEPT_LABELS]
+    words = [term for term in shared if not term.startswith("concept_")][:4]
+
+    signals = []
+    if concepts:
+        signals.append("shared concepts: " + ", ".join(concepts[:3]))
+    if words:
+        signals.append("shared terms: " + ", ".join(words))
+    if semantic_score is not None and method in {"semantic", "hybrid"}:
+        signals.append(f"semantic score {semantic_score:.2f}")
+    if lexical_score:
+        signals.append(f"lexical score {lexical_score:.2f}")
+
+    if not signals:
+        return f"Connected by {method} similarity."
+    return f"Connected by {method} similarity; " + "; ".join(signals) + "."
 
 
 def _normalized_title(topic: dict[str, Any]) -> str:

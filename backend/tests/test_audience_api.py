@@ -48,6 +48,8 @@ def test_fake_audience_run_returns_report_shape():
     assert payload["success"] is True
     assert data["recommendation"]["decision"] == "narrow"
     assert data["recommendation"]["best_channel"] == "linkedin"
+    assert data["recommendation"]["channel_scores"][0]["channel"] == "linkedin"
+    assert data["recommendation"]["channel_scores"][0]["score"] >= 60
     assert len(data["reactions"]) == 20
     assert data["write_counts"]["reactions"] == 20
 
@@ -56,6 +58,7 @@ def test_fake_audience_run_returns_report_shape():
     assert stored["data"]["status"] == "completed"
     assert stored["data"]["data"]["topic"]["title"] == "AI harnesses for PMs"
     assert stored["data"]["data"]["topic"]["cluster_label"] == "AI harnesses for PMs"
+    assert stored["data"]["data"]["recommendation"]["channel_scores"]
     assert stored["data"]["data"]["persona_memory"]
 
 
@@ -88,6 +91,7 @@ def test_second_fake_run_can_report_similarity_edge():
     history = client.get("/api/audience/runs?limit=5").get_json()["data"]
     assert history[0]["similar_topics"][0]["title"]
     assert history[0]["cluster_label"]
+    assert history[0]["channel_scores"]
 
 
 def test_audience_graph_endpoint_returns_sanitized_topic_cluster_snapshot(monkeypatch):
