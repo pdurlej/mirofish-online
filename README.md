@@ -1,54 +1,83 @@
 # MiroFish Online
 
-MiroFish Online is Piotr Durlej's private synthetic-audience graph for content
-and product thinking. It is a fork of
-[`nikmcfly/MiroFish-Offline`](https://github.com/nikmcfly/MiroFish-Offline),
-but the current product direction is narrower and more practical:
+MiroFish Online is a synthetic audience graph for testing content, product, and
+market ideas before committing to a bigger bet. It helps creators, product
+teams, founders, and operators ask a stable set of LLM-backed personas:
 
-> Test podcast, LinkedIn, blog, Twitter/X, and product ideas against a stable
-> 20-person synthetic audience, then remember the reactions as a private graph.
+> Is this idea worth publishing, rewriting, narrowing, saving for later, or
+> dropping?
 
-The goal is not to be a generic chatbot or a heavy OASIS-first simulator. The
-goal is to change Piotr's next action: publish, rewrite, narrow, abandon, turn
-into a podcast, turn into a post, or save for later.
+Each run collects structured reactions, objections, channel fit, decision
+recommendations, cost/reliability metadata, and similarity links to previous
+topics. The result is stored in Neo4j and visualized as an audience memory graph
+so repeated ideas can form branches instead of disappearing into one-off chats.
 
-## Current Direction
+## Who It Is For
 
-- **Private Audience Graph** for Piotr's public audience and product ideas.
-- **20 canonical synthetic personas** with stable identities and segments.
-- **Neo4j graph memory** for topics, reactions, objections, recommendations,
-  and similarity between previous ideas.
-- **DeepSeek V4 Flash-first cloud inference** through an OpenAI-compatible
-  endpoint, with local graph storage. The live default optimizes for
-  `deepseek-v4-flash`; `deepseek-v4-pro` is reserved for deliberate
-  high-quality retry/escalation. Broader GLM/Kimi/Minimax routing remains a
-  measured candidate path, not a promise.
-- **Tailnet-first deployment** on RS2000 at `mirofish.pdurlej.com`.
+- Content creators validating podcast, newsletter, blog, LinkedIn, or X/Twitter
+  ideas.
+- Product managers and product teams testing strategy, discovery, pricing,
+  AI-feature, and go-to-market topics.
+- Founders and startup operators looking for structured pushback before writing,
+  building, or pitching.
+- Solo operators who want repeatable synthetic feedback without turning every
+  question into a bespoke prompt-engineering session.
 
-This is an optimum for a solo operator without a very strong local GPU: private
-graph and UI locally, model inference through cloud APIs, and explicit cost /
-reliability receipts per run.
+## What It Does
+
+- Runs ideas against a stable synthetic audience with persona-level attribution.
+- Produces reactions, objections, insights, channel scores, and a recommended
+  next action.
+- Stores topics, reactions, objections, recommendations, clusters, and
+  similarity edges in Neo4j.
+- Shows a global D3 audience graph for clusters, related topics, and emerging
+  branches.
+- Tracks model usage, reliability, low-quality responses, retries, and fallback
+  behavior in a sanitized receipt.
+- Supports cloud LLM inference through an OpenAI-compatible API and local graph
+  storage.
+
+## Current Product Lane
+
+MiroFish Online is intentionally narrower than a full social simulation engine.
+The primary workflow is:
+
+1. Submit a topic, draft, or product question.
+2. Get structured feedback from a synthetic audience.
+3. See how this topic connects to earlier runs.
+4. Decide the next move: publish, rewrite, narrow, abandon, turn into a longer
+   format, or save for later.
+
+Full OASIS/CAMEL-style simulation remains a future lane. The current focus is a
+reliable audience graph and useful reports.
+
+## Architecture
+
+- **Frontend:** Vue + Vite, with D3 for the global audience graph.
+- **Backend:** Flask API.
+- **Graph storage:** Neo4j.
+- **Embeddings:** local lightweight embedding service for topic similarity.
+- **LLM calls:** OpenAI-compatible provider endpoint, configurable by runtime
+  environment.
+- **Deployment:** Docker Compose profile with host-local/private service
+  bindings by default.
+
+Privacy depends on how you deploy the app and which model provider you use.
+The graph can remain local/private, while LLM inference may still leave your
+environment if configured for a cloud provider.
 
 ## What Works Now
 
-- Private `/audience` UI flow.
-- Fake contract run for testing graph writes without spending model budget.
-- Live audience run path with 20 personas, model attribution, token usage,
-  reliability metadata, and Neo4j persistence.
-- History of previous topic runs and similarity edges.
-- RS2000 smoke checks for private deployment shape.
-
-## What Is Deferred
-
-- OASIS/CAMEL full simulation.
-- Zep Cloud.
-- Public multi-user SaaS exposure.
-- Backup commitment for MiroFish graph data.
-- Postgres adapter.
-
-OASIS remains a future North Star for cases where the argument between audience
-segments is itself useful, for example as a podcast format. It is not the core
-runtime path for this phase.
+- Audience run API and UI.
+- Fake run path for contract testing without model spend.
+- Live LLM-backed audience run path.
+- Neo4j persistence for topics, personas, reactions, objections,
+  recommendations, similarity edges, and clusters.
+- History view with similar-topic summaries.
+- Global audience graph view at `/audience/graph`.
+- Channel-fit scoring and next-action recommendations.
+- Sanitized model receipts with reliability, retry, and token/cost metadata.
+- Synthetic research snapshot importer for controlled large-batch experiments.
 
 ## Local Checks
 
@@ -61,32 +90,31 @@ Useful focused checks:
 ```bash
 cd backend && uv run pytest
 python3 scripts/model_inventory.py --json
-python3 scripts/rs2000_smoke_check.py
 ```
 
-## Deployment Shape
+The repository includes a Docker Compose smoke profile for a private host. Treat
+it as an example and adapt hostnames, networks, secrets, and routing to your own
+environment.
 
-The RS2000 deployment keeps externally risky services private:
+## Deployment Notes
 
-- UI exposed through the existing private route.
-- Backend API same-origin through the UI path.
-- Neo4j HTTP/Bolt bound locally/private only.
-- Embedding Ollama sidecar is local/private.
-- Cloud LLM keys stay in runtime secrets, never in repo artifacts.
+A typical private deployment keeps risky services off the public internet:
 
-## North Star
+- The UI is exposed through your chosen private or authenticated route.
+- Backend API calls are same-origin through the UI path.
+- Neo4j HTTP/Bolt stay bound to local/private interfaces.
+- Embedding services stay local/private.
+- Provider keys stay in runtime secrets, never in repo artifacts.
 
-See [`docs/north-star.md`](docs/north-star.md) for the canonical product
-direction.
+Do not expose Neo4j, provider credentials, or internal model endpoints publicly.
 
 ## Upstream Heritage
 
-This fork inherits ideas and code from MiroFish / MiroFish-Offline:
+This project inherits ideas and code from MiroFish / MiroFish-Offline, including
+multi-agent simulation concepts, graph memory direction, Neo4j storage, and
+OASIS/CAMEL simulation lineage. This fork focuses first on synthetic audience
+research and a practical topic-memory graph.
 
-- multi-agent simulation concepts;
-- Neo4j graph memory direction;
-- OASIS/CAMEL simulation lineage;
-- AGPL-3.0 license.
+## License
 
-The public upstream is broader. This fork is intentionally narrower: Piotr's
-private audience graph first, full simulation later only if it proves its value.
+AGPL-3.0.
