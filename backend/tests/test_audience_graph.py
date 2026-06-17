@@ -18,6 +18,7 @@ from app.audience import (
     load_default_personas,
 )
 from app.audience.live_runner import (
+    PERSONA_JSON_MAX_TOKENS,
     PersonaCallResult,
     _parse_and_validate,
     _recommendation_for,
@@ -730,6 +731,42 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
     assert result.receipt["high_quality_retry_count"] == 1
     assert result.receipt["high_quality_retry_success_count"] == 1
     assert result.receipt["failed_persona_count"] == 0
+
+
+def test_live_runner_uses_larger_json_budget_for_schema_and_repair_calls():
+    class CaptureBudgetClient:
+        def __init__(self) -> None:
+            self.max_tokens: list[int] = []
+
+        def chat_with_metadata(self, **kwargs):  # noqa: ANN001
+            self.max_tokens.append(int(kwargs["max_tokens"]))
+            if len(self.max_tokens) == 1:
+                return LLMChatResult(
+                    content="{not valid json",
+                    model=kwargs["model"],
+                    usage={"prompt_tokens": 1, "completion_tokens": 450, "total_tokens": 451},
+                    latency_ms=10,
+                    finish_reason="length",
+                )
+            return LLMChatResult(
+                content=VALID_REACTION_JSON,
+                model=kwargs["model"],
+                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                latency_ms=20,
+                finish_reason="stop",
+            )
+
+    client = CaptureBudgetClient()
+    runner = AudienceLiveRunner(client_factory=lambda: client, max_workers=1)
+
+    result = runner.run(
+        AudienceRunInput(topic="Czy PM powinien rozumieć CI/CD?", run_seed="json-budget"),
+        personas=load_default_personas()[:1],
+    )
+
+    assert len(result.reactions) == 1
+    assert client.max_tokens == [PERSONA_JSON_MAX_TOKENS, PERSONA_JSON_MAX_TOKENS]
+    assert PERSONA_JSON_MAX_TOKENS >= 900
 
 
 def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
