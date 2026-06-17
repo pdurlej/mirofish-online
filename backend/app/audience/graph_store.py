@@ -344,6 +344,7 @@ class Neo4jAudienceGraphStore:
                        r.total_tokens AS total_tokens,
                        r.failure_rate AS failure_rate,
                        r.reliability_grade AS reliability_grade,
+                       r.payload_json AS payload_json,
                        t.title AS title,
                        t.channel AS channel,
                        t.cluster_label AS cluster_label,
@@ -745,6 +746,9 @@ def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def _neo4j_history_summary(record: dict[str, Any]) -> dict[str, Any]:
+    if record.get("payload_json"):
+        return _history_summary(_enrich_payload_for_read(json.loads(record["payload_json"])))
+
     similar_topics = [
         topic | {"explanation": topic.get("explanation") or _fallback_edge_explanation(topic)}
         for topic in record.get("similar_topics", [])

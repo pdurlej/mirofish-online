@@ -25,6 +25,7 @@ from app.audience.live_runner import (
     _reasoning_effort_for_model,
 )
 from app.audience.channel_fit import build_channel_scores, top_channel
+from app.audience.graph_store import _neo4j_history_summary
 from app.audience.research_snapshot import SyntheticResearchDataset, build_snapshot_run
 from app.audience.similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
 from app.storage.embedding_service import EmbeddingError
@@ -81,6 +82,28 @@ def test_model_router_default_live_pool_is_flash_only():
     router = ModelRouter()
 
     assert router.model_pool == ("deepseek-v4-flash",)
+
+
+def test_neo4j_history_summary_uses_stored_channel_scores_payload():
+    payload = build_fake_audience_run(
+        AudienceRunInput(
+            topic="Czy tanie modele są dobrym treningiem AI dla produktowca?",
+            title="Tanie modele jako trening AI",
+            channel="unknown",
+            run_seed="history-channel",
+        )
+    ).to_dict()
+    payload["recommendation"]["best_channel"] = "linkedin"
+    payload["recommendation"]["channel_scores"] = [
+        {"channel": "linkedin", "label": "LinkedIn", "score": 75},
+        {"channel": "product-idea", "label": "Product idea", "score": 41},
+    ]
+
+    summary = _neo4j_history_summary({"payload_json": json.dumps(payload)})
+
+    assert summary["best_channel"] == "linkedin"
+    assert summary["channel_scores"][0]["channel"] == "linkedin"
+    assert summary["channel_scores"][0]["score"] == 75
 
 
 def test_deepseek_flash_uses_low_reasoning_effort():
