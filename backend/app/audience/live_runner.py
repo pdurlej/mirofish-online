@@ -118,6 +118,7 @@ RETRYABLE_PERSONA_ERRORS = {
     "schema_validation_failed",
     "low_quality_response",
 }
+PERSONA_JSON_MAX_TOKENS = 900
 
 
 class AudienceLiveRunner:
@@ -382,7 +383,7 @@ class AudienceLiveRunner:
             result = client.chat_with_metadata(
                 messages=messages,
                 temperature=0.35,
-                max_tokens=450,
+                max_tokens=PERSONA_JSON_MAX_TOKENS,
                 response_format=response_format,
                 model=model,
                 reasoning_effort=_reasoning_effort_for_model(model),
@@ -442,7 +443,7 @@ class AudienceLiveRunner:
                 *messages,
             ],
             temperature=0.35,
-            max_tokens=450,
+            max_tokens=PERSONA_JSON_MAX_TOKENS,
             response_format={"type": "json_object"},
             model=model,
             reasoning_effort=_reasoning_effort_for_model(model),
