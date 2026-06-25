@@ -65,7 +65,7 @@ def test_model_router_is_seeded_and_records_attribution():
     assert first == second
     assert first.model in {"model-a", "model-b", persona.model_hint}
     assert retry.reason == "high_quality_retry"
-    assert retry.model == "deepseek-v4-pro"
+    assert retry.model == "gemma4:31b"
 
 
 def test_model_router_normalizes_legacy_cloud_suffix(monkeypatch):
@@ -78,10 +78,11 @@ def test_model_router_normalizes_legacy_cloud_suffix(monkeypatch):
     assert assignment.model in {"glm-5.1", "kimi-k2.6"}
 
 
-def test_model_router_default_live_pool_is_flash_only():
+def test_model_router_default_live_pool_is_gemma4():
     router = ModelRouter()
 
-    assert router.model_pool == ("deepseek-v4-flash",)
+    assert router.model_pool == ("gemma4:31b",)
+    assert router.high_quality_retry_model == "gemma4:31b"
 
 
 def test_neo4j_history_summary_uses_stored_channel_scores_payload():
@@ -708,7 +709,36 @@ def test_live_audience_runner_records_usage_and_receipt():
     assert payload["receipt"]["mode"] == "live"
     assert payload["receipt"]["usage"]["total_tokens"] == 600
     assert payload["receipt"]["failed_persona_count"] == 0
-    assert payload["receipt"]["reliability_grade"] == "green"
+    assert payload["receipt"]["reliability_grade"] == "red"
+    assert payload["receipt"]["duplicate_objection_count"] == 19
+    assert payload["receipt"]["max_duplicate_objections"] == 20
+    assert payload["receipt"]["quality_warnings"][0]["kind"] == "duplicate_objections"
+
+
+def test_live_runner_records_model_routing_in_receipt():
+    runner = AudienceLiveRunner(
+        client_factory=FakeLLMClient,
+        model_router=ModelRouter(
+            model_pool=("gemma4:31b",),
+            high_quality_retry_model="gemma4:31b",
+        ),
+    )
+
+    result = runner.run(
+        AudienceRunInput(
+            topic="Should product managers care about AI harnesses?",
+            channel="linkedin",
+            run_seed="model-routing-receipt",
+        ),
+        personas=load_default_personas()[:1],
+    )
+
+    routing = result.receipt["model_routing"]
+    assert routing["model_pool"] == ["gemma4:31b"]
+    assert routing["high_quality_retry_model"] == "gemma4:31b"
+    assert routing["failure_threshold"] == 0.30
+    assert routing["max_workers"] == 10
+    assert result.reactions[0]["model"] == "gemma4:31b"
 
 
 def test_live_runner_retries_invalid_json_with_high_quality_model():
@@ -733,6 +763,10 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
 
     runner = AudienceLiveRunner(
         client_factory=InvalidJsonThenProClient,
+        model_router=ModelRouter(
+            model_pool=("deepseek-v4-flash",),
+            high_quality_retry_model="deepseek-v4-pro",
+        ),
         max_workers=1,
     )
 
@@ -826,10 +860,10 @@ def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
     )
 
     assert len(result.reactions) == 1
-    assert result.reactions[0]["model"] == "deepseek-v4-flash"
+    assert result.reactions[0]["model"] == "gemma4:31b"
     assert result.receipt["usage"]["total_tokens"] == 33
-    assert result.receipt["models"]["deepseek-v4-flash"]["calls"] == 2
-    assert result.receipt["models"]["deepseek-v4-flash"]["failures"] == 1
+    assert result.receipt["models"]["gemma4:31b"]["calls"] == 2
+    assert result.receipt["models"]["gemma4:31b"]["failures"] == 1
     assert result.receipt["schema_fallback_attempt_count"] == 1
     assert result.receipt["schema_fallback_count"] == 1
     assert result.receipt["persona_repair_retry_count"] == 1
@@ -861,6 +895,10 @@ def test_live_runner_retries_low_quality_with_visible_receipt_count():
 
     runner = AudienceLiveRunner(
         client_factory=LowQualityThenProClient,
+        model_router=ModelRouter(
+            model_pool=("deepseek-v4-flash",),
+            high_quality_retry_model="deepseek-v4-pro",
+        ),
         max_workers=1,
     )
 
@@ -1019,7 +1057,7 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
     assert result.failures == [
         {
             "persona_id": slow_persona_id,
-            "model": "deepseek-v4-flash",
+            "model": "gemma4:31b",
             "error_kind": "run_timeout",
         }
     ]

@@ -184,6 +184,20 @@ class FakeRunner:
                 "total_tokens": 300,
             },
             "reliability_grade": "green",
+            "model_routing": {
+                "model_pool": ["gemma4:31b"],
+                "high_quality_retry_model": "gemma4:31b",
+                "failure_threshold": 0.3,
+                "max_workers": 6,
+            },
+            "quality_warnings": [
+                {
+                    "kind": "duplicate_objections",
+                    "message": "Treat this run as lower confidence.",
+                }
+            ],
+            "duplicate_objection_count": 3,
+            "max_duplicate_objections": 4,
         }
         return result.__class__(
             run_id=live_run_id(run_input),
@@ -242,6 +256,10 @@ def test_live_audience_run_endpoint_queues_completes_and_lists_history(monkeypat
     assert history["data"][0]["total_tokens"] == 300
     assert "similar_topics" in history["data"][0]
     assert "cluster_label" in history["data"][0]
+    assert history["data"][0]["model_routing"]["model_pool"] == ["gemma4:31b"]
+    assert history["data"][0]["quality_warnings"][0]["kind"] == "duplicate_objections"
+    assert history["data"][0]["duplicate_objection_count"] == 3
+    assert history["data"][0]["max_duplicate_objections"] == 4
 
 
 class FailingRunner:

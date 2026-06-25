@@ -113,6 +113,8 @@ GENERIC_OBJECTION_FALLBACKS = {
     "this needs a clearer practical consequence.",
     "this needs a clearer practical consequence for the audience.",
 }
+MAX_GREEN_DUPLICATE_OBJECTION_COUNT = 2
+MAX_YELLOW_DUPLICATE_OBJECTION_COUNT = 4
 RETRYABLE_PERSONA_ERRORS = {
     "invalid_json",
     "schema_validation_failed",
@@ -167,6 +169,12 @@ class AudienceLiveRunner:
         insights: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
         receipt = _empty_live_receipt()
+        receipt["model_routing"] = {
+            "model_pool": list(self._model_router.model_pool),
+            "high_quality_retry_model": self._model_router.high_quality_retry_model,
+            "failure_threshold": self._failure_threshold,
+            "max_workers": self._max_workers,
+        }
 
         future_map = {}
         timed_out = False
@@ -273,6 +281,7 @@ class AudienceLiveRunner:
         receipt["failed_persona_count"] = len(failures)
         receipt["failure_rate"] = round(len(failures) / len(active_personas), 3)
         receipt["reliability_grade"] = _reliability_grade(receipt["failure_rate"])
+        _apply_batch_quality_audit(receipt, objections)
 
         if receipt["failure_rate"] > self._failure_threshold:
             raise AudienceRunFailed(
@@ -637,6 +646,15 @@ def _empty_live_receipt() -> dict[str, Any]:
             "semantic_provider_configured": False,
             "semantic_edge_count": 0,
         },
+        "model_routing": {
+            "model_pool": [],
+            "high_quality_retry_model": None,
+            "failure_threshold": None,
+            "max_workers": None,
+        },
+        "quality_warnings": [],
+        "duplicate_objection_count": 0,
+        "max_duplicate_objections": 0,
         "run_timed_out": False,
         "failed_persona_count": 0,
         "low_quality_persona_count": 0,
@@ -704,6 +722,51 @@ def _record_failure(receipt: dict[str, Any], model: str) -> None:
     )
     model_entry["calls"] += 1
     model_entry["failures"] += 1
+
+
+def _apply_batch_quality_audit(receipt: dict[str, Any], objections: list[dict[str, Any]]) -> None:
+    duplicates = _duplicate_objection_stats(objections)
+    receipt["duplicate_objection_count"] = duplicates["duplicate_objection_count"]
+    receipt["max_duplicate_objections"] = duplicates["max_duplicate_objections"]
+    if duplicates["max_duplicate_objections"] <= MAX_GREEN_DUPLICATE_OBJECTION_COUNT:
+        return
+
+    warning = {
+        "kind": "duplicate_objections",
+        "message": (
+            "Multiple personas returned the same objection; treat the run as lower confidence."
+        ),
+        "duplicate_objection_count": duplicates["duplicate_objection_count"],
+        "max_duplicate_objections": duplicates["max_duplicate_objections"],
+    }
+    receipt.setdefault("quality_warnings", []).append(warning)
+    if duplicates["max_duplicate_objections"] > MAX_YELLOW_DUPLICATE_OBJECTION_COUNT:
+        receipt["reliability_grade"] = "red"
+        return
+    if receipt.get("reliability_grade") == "green":
+        receipt["reliability_grade"] = "yellow"
+
+
+def _duplicate_objection_stats(objections: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for objection in objections:
+        normalized = _normalize_objection_for_duplicate_check(objection.get("text"))
+        if not normalized:
+            continue
+        counts[normalized] = counts.get(normalized, 0) + 1
+
+    max_duplicate = max(counts.values(), default=0)
+    duplicate_count = sum(count - 1 for count in counts.values() if count > 1)
+    return {
+        "duplicate_objection_count": duplicate_count,
+        "max_duplicate_objections": max_duplicate,
+    }
+
+
+def _normalize_objection_for_duplicate_check(value: Any) -> str:
+    text = str(value or "").casefold()
+    text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
 
 
 def _ensure_success_attempts(
