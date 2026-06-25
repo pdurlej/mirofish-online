@@ -699,6 +699,10 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "total_tokens": receipt.get("usage", {}).get("total_tokens", 0),
         "failure_rate": receipt.get("failure_rate", 0.0),
         "reliability_grade": receipt.get("reliability_grade", "unknown"),
+        "model_routing": receipt.get("model_routing", {}),
+        "quality_warnings": receipt.get("quality_warnings", []),
+        "duplicate_objection_count": receipt.get("duplicate_objection_count", 0),
+        "max_duplicate_objections": receipt.get("max_duplicate_objections", 0),
     }
 
 

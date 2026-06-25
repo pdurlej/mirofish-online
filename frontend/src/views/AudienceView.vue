@@ -173,6 +173,32 @@
               </div>
             </div>
 
+            <section class="quality-card" :class="{ warning: qualityWarnings.length }">
+              <div>
+                <span>Model path</span>
+                <strong>{{ modelPoolLabel }}</strong>
+                <small v-if="retryModelLabel">Retry: {{ retryModelLabel }}</small>
+              </div>
+              <div>
+                <span>Quality check</span>
+                <strong>{{ qualityWarnings.length ? 'low confidence' : 'clear' }}</strong>
+                <small>
+                  duplicates {{ receipt.duplicate_objection_count || 0 }} · max same
+                  {{ receipt.max_duplicate_objections || 0 }}
+                </small>
+              </div>
+            </section>
+
+            <section v-if="qualityWarnings.length" class="result-section">
+              <h3>Quality warnings</h3>
+              <ul class="warning-list">
+                <li v-for="warning in qualityWarnings" :key="warning.kind || warning.message">
+                  <strong>{{ warning.kind || 'quality_warning' }}</strong>
+                  <span>{{ warning.message || 'Treat this run as lower confidence.' }}</span>
+                </li>
+              </ul>
+            </section>
+
             <div class="graph-context">
               <div class="context-card">
                 <span>Cluster</span>
@@ -244,6 +270,8 @@
             <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
             <span v-if="historyChannelLabel(item)">Best: {{ historyChannelLabel(item) }}</span>
             <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
+            <span v-if="historyModelLabel(item)">Model: {{ historyModelLabel(item) }}</span>
+            <span v-if="historyQualityLabel(item)" class="history-warning">{{ historyQualityLabel(item) }}</span>
             <span v-if="item.cluster_label">Cluster: {{ item.cluster_label }}</span>
             <span v-if="similarTopicsLabel(item)">Similar: {{ similarTopicsLabel(item) }}</span>
           </button>
@@ -290,6 +318,10 @@ const topObjections = computed(() => objections.value.slice(0, 6))
 const receipt = computed(() => result.value?.receipt || {})
 const reliabilityLabel = computed(() => receipt.value.reliability_grade || 'unknown')
 const similarityEdges = computed(() => result.value?.similarity_edges || [])
+const qualityWarnings = computed(() => receipt.value.quality_warnings || [])
+const modelRouting = computed(() => receipt.value.model_routing || {})
+const modelPoolLabel = computed(() => formatModelPool(modelRouting.value.model_pool))
+const retryModelLabel = computed(() => modelRouting.value.high_quality_retry_model || '')
 const channelScores = computed(() => {
   const scores = recommendation.value?.channel_scores || []
   return scores
@@ -429,6 +461,28 @@ const historyChannelLabel = (item) => {
   return item.best_channel || ''
 }
 
+const historyModelLabel = (item) => {
+  const models = item.model_routing?.model_pool
+  if (!Array.isArray(models) || models.length === 0) return ''
+  return formatModelPool(models)
+}
+
+const historyQualityLabel = (item) => {
+  const warnings = item.quality_warnings || []
+  if (warnings.length) return `${warnings.length} quality warning${warnings.length === 1 ? '' : 's'}`
+  const duplicateCount = Number(item.duplicate_objection_count || 0)
+  const maxDuplicate = Number(item.max_duplicate_objections || 0)
+  if (duplicateCount || maxDuplicate > 1) return `duplicates ${duplicateCount} · max same ${maxDuplicate}`
+  return ''
+}
+
+const formatModelPool = (models) => {
+  if (!Array.isArray(models) || models.length === 0) return 'unknown'
+  const unique = [...new Set(models.filter(Boolean).map(String))]
+  if (unique.length <= 2) return unique.join(', ')
+  return `${unique.slice(0, 2).join(', ')} +${unique.length - 2}`
+}
+
 const trimText = (text, limit) => {
   const cleaned = String(text || '').replace(/\s+/g, ' ').trim()
   if (cleaned.length <= limit) return cleaned
@@ -513,7 +567,11 @@ const trimText = (text, limit) => {
 .similar-topic-list small,
 .objection-list span,
 .persona-list span,
-.persona-list small {
+.persona-list small,
+.quality-card span,
+.quality-card small,
+.warning-list strong,
+.history-warning {
   font-family: var(--mf-font-mono);
 }
 
@@ -979,6 +1037,8 @@ textarea:focus {
 
 .metric-row div,
 .context-card,
+.quality-card,
+.warning-list li,
 .persona-list div {
   border: 1px solid rgba(132, 184, 209, 0.18);
   border-radius: 16px;
@@ -1003,6 +1063,67 @@ textarea:focus {
   color: var(--mf-ink-faint);
   font-size: 0.76rem;
   margin-top: 4px;
+}
+
+.quality-card {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.quality-card.warning {
+  border-color: rgba(255, 211, 107, 0.34);
+  background: rgba(255, 211, 107, 0.07);
+}
+
+.quality-card span,
+.quality-card strong,
+.quality-card small {
+  display: block;
+}
+
+.quality-card span,
+.quality-card small {
+  color: var(--mf-ink-faint);
+  font-size: 0.76rem;
+}
+
+.quality-card strong {
+  margin-top: 5px;
+}
+
+.quality-card small {
+  margin-top: 6px;
+  line-height: 1.35;
+}
+
+.warning-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.warning-list li {
+  padding: 12px;
+}
+
+.warning-list strong,
+.warning-list span {
+  display: block;
+}
+
+.warning-list strong {
+  color: var(--mf-yellow);
+  font-size: 0.78rem;
+}
+
+.warning-list span {
+  margin-top: 4px;
+  color: var(--mf-ink-muted);
+  line-height: 1.4;
 }
 
 .graph-context {
@@ -1144,6 +1265,10 @@ textarea:focus {
   line-height: 1.35;
 }
 
+.history-item .history-warning {
+  color: var(--mf-yellow);
+}
+
 .history-empty {
   color: var(--mf-ink-muted);
 }
@@ -1198,6 +1323,7 @@ textarea:focus {
 
   .mode-toggle,
   .metric-row,
+  .quality-card,
   .persona-list {
     grid-template-columns: 1fr;
   }
