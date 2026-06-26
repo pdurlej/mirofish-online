@@ -801,15 +801,11 @@ def _recommendation_for(
     reactions: list[dict[str, Any]],
     objections: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    skeptical = sum(1 for reaction in reactions if reaction["stance"] in {"skeptical", "needs_translation"})
+    skeptical = sum(1 for reaction in reactions if reaction["stance"] == "skeptical")
+    needs_translation = sum(1 for reaction in reactions if reaction["stance"] == "needs_translation")
+    resistant = skeptical + needs_translation
     high_objections = sum(1 for objection in objections if objection["severity"] == "high")
-    question_driven = "?" in run_input.topic
-    if skeptical >= 8:
-        decision = "rewrite"
-    elif high_objections >= 6 or question_driven:
-        decision = "narrow"
-    else:
-        decision = "publish"
+    question_driven = _is_question_driven(run_input.topic)
     channel_scores = build_channel_scores(
         topic_text=run_input.topic,
         title=run_input.display_title,
@@ -818,16 +814,27 @@ def _recommendation_for(
         objections=objections,
     )
     best_channel = top_channel(channel_scores)
+    action_scorecard = _action_scorecard(
+        reactions=reactions,
+        channel_scores=channel_scores,
+        skeptical=skeptical,
+        needs_translation=needs_translation,
+        high_objections=high_objections,
+        question_driven=question_driven,
+    )
+    decision = action_scorecard[0]["decision"]
     top_objection = _representative_objection(objections)
     polish = _is_likely_polish(run_input.topic)
     return {
         "decision": decision,
+        "decision_confidence": _decision_confidence(action_scorecard),
+        "action_scorecard": action_scorecard,
         "best_channel": best_channel,
         "channel_scores": channel_scores,
         "next_action": _next_action(decision, best_channel, top_objection, polish=polish),
         "rationale": _recommendation_rationale(
             decision,
-            skeptical,
+            resistant,
             high_objections,
             question_driven,
             top_objection,
@@ -844,6 +851,106 @@ def _best_channel(reactions: list[dict[str, Any]]) -> str:
             if channel in value:
                 counts[channel] = counts.get(channel, 0) + 1
     return max(counts, key=counts.get) if counts else "unknown"
+
+
+def _action_scorecard(
+    *,
+    reactions: list[dict[str, Any]],
+    channel_scores: list[dict[str, Any]],
+    skeptical: int,
+    needs_translation: int,
+    high_objections: int,
+    question_driven: bool,
+) -> list[dict[str, Any]]:
+    sample_size = max(len(reactions), 1)
+    supportive = sum(1 for reaction in reactions if reaction["stance"] in {"interested", "curious"})
+    support_share = supportive / sample_size
+    resistant = skeptical + needs_translation
+    top_score = int(channel_scores[0].get("score", 0)) if channel_scores else 0
+    second_score = int(channel_scores[1].get("score", 0)) if len(channel_scores) > 1 else 0
+    channel_gap = max(0, top_score - second_score)
+    top_confidence = float(channel_scores[0].get("confidence", 0.0)) if channel_scores else 0.0
+    small_sample = sample_size < 8
+
+    publish = (
+        38
+        + (support_share * 32)
+        + (max(0, top_score - 62) * 0.75)
+        + min(10, channel_gap * 0.5)
+        + (top_confidence * 8)
+        - (resistant * 2.6)
+        - (high_objections * 4.2)
+        - (6 if question_driven else 0)
+        - (18 if small_sample else 0)
+    )
+    rewrite = (
+        24
+        + (skeptical * 4.2)
+        + (needs_translation * 3.4)
+        + (high_objections * 3.4)
+        + (8 if top_score < 65 else 0)
+    )
+    narrow = (
+        34
+        + (14 if question_driven else 0)
+        + (needs_translation * 2.2)
+        + (high_objections * 2.1)
+        + (max(0, 74 - top_score) * 0.55)
+        + (6 if channel_gap < 6 else 0)
+        + (10 if small_sample else 0)
+    )
+    abandon = (
+        4
+        + (skeptical * 2.7)
+        + (high_objections * 3.8)
+        + (max(0, 58 - top_score) * 0.7)
+        - (supportive * 1.5)
+    )
+
+    rows = [
+        {
+            "decision": "publish",
+            "label": "Publish",
+            "score": _bounded_action_score(publish),
+            "driver": "Audience support and a clear top channel outweigh the remaining risk.",
+        },
+        {
+            "decision": "rewrite",
+            "label": "Rewrite",
+            "score": _bounded_action_score(rewrite),
+            "driver": "Skepticism, translation friction, or high-severity objections change the angle.",
+        },
+        {
+            "decision": "narrow",
+            "label": "Narrow",
+            "score": _bounded_action_score(narrow),
+            "driver": "The topic still needs one sharper claim, proof, or channel choice.",
+        },
+        {
+            "decision": "abandon",
+            "label": "Abandon",
+            "score": _bounded_action_score(abandon),
+            "driver": "The audience signal is too weak for this topic without new evidence.",
+        },
+    ]
+    return sorted(rows, key=lambda item: (-int(item["score"]), item["decision"]))
+
+
+def _bounded_action_score(score: float) -> int:
+    return max(0, min(96, round(score)))
+
+
+def _decision_confidence(action_scorecard: list[dict[str, Any]]) -> float:
+    if not action_scorecard:
+        return 0.0
+    top_score = int(action_scorecard[0].get("score", 0))
+    second_score = int(action_scorecard[1].get("score", 0)) if len(action_scorecard) > 1 else 0
+    return round(max(0.35, min(0.94, 0.42 + ((top_score - second_score) / 100))), 2)
+
+
+def _is_question_driven(text: str) -> bool:
+    normalized = f" {text.casefold()} "
+    return "?" in text or " czy " in normalized or " dlaczego " in normalized
 
 
 def _next_action(

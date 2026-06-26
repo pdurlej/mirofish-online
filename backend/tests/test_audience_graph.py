@@ -95,6 +95,7 @@ def test_neo4j_history_summary_uses_stored_channel_scores_payload():
         )
     ).to_dict()
     payload["recommendation"]["best_channel"] = "linkedin"
+    payload["recommendation"]["decision_confidence"] = 0.72
     payload["recommendation"]["channel_scores"] = [
         {"channel": "linkedin", "label": "LinkedIn", "score": 75},
         {"channel": "product-idea", "label": "Product idea", "score": 41},
@@ -103,6 +104,7 @@ def test_neo4j_history_summary_uses_stored_channel_scores_payload():
     summary = _neo4j_history_summary({"payload_json": json.dumps(payload)})
 
     assert summary["best_channel"] == "linkedin"
+    assert summary["decision_confidence"] == 0.72
     assert summary["channel_scores"][0]["channel"] == "linkedin"
     assert summary["channel_scores"][0]["score"] == 75
 
@@ -945,6 +947,65 @@ def test_live_recommendation_uses_channel_and_objection_for_polish_next_action()
     assert "Zacznij od linkedin" in recommendation["next_action"]
     assert "Brakuje dowodów" in recommendation["next_action"]
     assert "szerokim pytaniem" in recommendation["rationale"]
+
+
+def test_live_recommendation_can_publish_question_when_audience_signal_is_strong():
+    recommendation = _recommendation_for(
+        AudienceRunInput(
+            topic=(
+                "Czy PM powinien projektować workflow agentów AI, jeśli ma jasny przykład "
+                "wpływu na decyzje discovery i delivery?"
+            ),
+            title="PM jako projektant workflow agentów AI",
+            run_seed="recommendation-publish",
+        ),
+        reactions=[
+            {
+                "stance": "interested" if index < 12 else "curious",
+                "channel_fit": "linkedin strong" if index < 14 else "blog medium",
+            }
+            for index in range(20)
+        ],
+        objections=[
+            {
+                "text": "Pokaż jeden konkretny przykład wpływu na decyzję PM-a.",
+                "severity": "medium",
+            }
+            for _ in range(20)
+        ],
+    )
+
+    assert recommendation["decision"] == "publish"
+    assert recommendation["action_scorecard"][0]["decision"] == "publish"
+    assert recommendation["decision_confidence"] > 0.4
+
+
+def test_live_recommendation_rewrites_when_skepticism_and_high_objections_dominate():
+    recommendation = _recommendation_for(
+        AudienceRunInput(
+            topic="Czy każdy PM musi znać observability, CI/CD i evale AI?",
+            title="PM i techniczny ciężar AI delivery",
+            run_seed="recommendation-rewrite",
+        ),
+        reactions=[
+            {
+                "stance": "skeptical" if index < 10 else "needs_translation" if index < 16 else "curious",
+                "channel_fit": "linkedin weak" if index < 12 else "blog medium",
+            }
+            for index in range(20)
+        ],
+        objections=[
+            {
+                "text": "To miesza odpowiedzialność PM-a z pracą engineeringu bez jasnej granicy.",
+                "severity": "high" if index < 8 else "medium",
+            }
+            for index in range(20)
+        ],
+    )
+
+    assert recommendation["decision"] == "rewrite"
+    assert recommendation["action_scorecard"][0]["decision"] == "rewrite"
+    assert recommendation["action_scorecard"][0]["score"] > recommendation["action_scorecard"][1]["score"]
 
 
 def test_live_runner_normalizes_loose_provider_json():
