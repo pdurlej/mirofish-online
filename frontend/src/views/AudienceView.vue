@@ -106,11 +106,33 @@
 
           <div v-else class="result-stack">
             <div class="decision-card">
-              <span class="decision-pill" :class="`decision-${recommendation.decision || 'unknown'}`">
-                {{ recommendation.decision || 'unknown' }}
-              </span>
+              <div class="decision-card-head">
+                <span class="decision-pill" :class="`decision-${recommendation.decision || 'unknown'}`">
+                  {{ recommendation.decision || 'unknown' }}
+                </span>
+                <span v-if="decisionConfidenceLabel" class="decision-confidence">
+                  {{ decisionConfidenceLabel }} confidence
+                </span>
+              </div>
               <h2>{{ recommendation.next_action || 'No next action recorded.' }}</h2>
               <p>{{ recommendation.rationale || 'No rationale recorded.' }}</p>
+              <div v-if="actionScorecard.length" class="action-scorecard">
+                <div
+                  v-for="action in actionScorecard"
+                  :key="action.decision"
+                  class="action-score-row"
+                  :class="{ active: action.decision === recommendation.decision }"
+                >
+                  <div class="action-score-top">
+                    <strong>{{ action.label || action.decision }}</strong>
+                    <span>{{ action.score }}%</span>
+                  </div>
+                  <div class="action-meter" aria-hidden="true">
+                    <i :style="{ width: scoreWidth(action.score) }"></i>
+                  </div>
+                  <small>{{ action.driver }}</small>
+                </div>
+              </div>
             </div>
 
             <section v-if="channelScores.length" class="channel-fit-card">
@@ -268,6 +290,7 @@
           >
             <strong>{{ item.title || item.run_id }}</strong>
             <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
+            <span v-if="historyDecisionConfidence(item)">Action confidence: {{ historyDecisionConfidence(item) }}</span>
             <span v-if="historyChannelLabel(item)">Best: {{ historyChannelLabel(item) }}</span>
             <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
             <span v-if="historyModelLabel(item)">Model: {{ historyModelLabel(item) }}</span>
@@ -322,6 +345,20 @@ const qualityWarnings = computed(() => receipt.value.quality_warnings || [])
 const modelRouting = computed(() => receipt.value.model_routing || {})
 const modelPoolLabel = computed(() => formatModelPool(modelRouting.value.model_pool))
 const retryModelLabel = computed(() => modelRouting.value.high_quality_retry_model || '')
+const actionScorecard = computed(() => {
+  const rows = recommendation.value?.action_scorecard || []
+  return rows
+    .map((item) => ({
+      ...item,
+      score: Math.max(0, Math.min(100, Number(item.score) || 0))
+    }))
+    .sort((a, b) => b.score - a.score)
+})
+const decisionConfidenceLabel = computed(() => {
+  const value = Number(recommendation.value?.decision_confidence)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+})
 const channelScores = computed(() => {
   const scores = recommendation.value?.channel_scores || []
   return scores
@@ -474,6 +511,12 @@ const historyQualityLabel = (item) => {
   const maxDuplicate = Number(item.max_duplicate_objections || 0)
   if (duplicateCount || maxDuplicate > 1) return `duplicates ${duplicateCount} · max same ${maxDuplicate}`
   return ''
+}
+
+const historyDecisionConfidence = (item) => {
+  const value = Number(item.decision_confidence)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
 }
 
 const formatModelPool = (models) => {
@@ -907,6 +950,13 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.decision-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .decision-pill {
   display: inline-flex;
   border-radius: 999px;
@@ -915,6 +965,12 @@ textarea:focus {
   color: var(--mf-accent);
   text-transform: uppercase;
   font-size: 0.72rem;
+}
+
+.decision-confidence {
+  color: var(--mf-ink-faint);
+  font-family: var(--mf-font-mono);
+  font-size: 0.74rem;
 }
 
 .decision-abandon,
@@ -935,6 +991,66 @@ textarea:focus {
 .decision-post {
   background: rgba(102, 242, 167, 0.16);
   color: var(--mf-green);
+}
+
+.action-scorecard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.action-score-row {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(132, 184, 209, 0.16);
+  border-radius: 14px;
+  background: rgba(3, 10, 18, 0.28);
+}
+
+.action-score-row.active {
+  border-color: rgba(56, 225, 255, 0.5);
+  background: rgba(56, 225, 255, 0.07);
+}
+
+.action-score-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.action-score-top strong {
+  min-width: 0;
+}
+
+.action-score-top span {
+  flex-shrink: 0;
+  color: var(--mf-accent);
+  font-family: var(--mf-font-mono);
+  font-size: 0.8rem;
+}
+
+.action-meter {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(132, 184, 209, 0.16);
+}
+
+.action-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--mf-accent), var(--mf-green));
+  box-shadow: 0 0 16px rgba(56, 225, 255, 0.24);
+}
+
+.action-score-row small {
+  color: var(--mf-ink-faint);
+  line-height: 1.35;
 }
 
 .channel-fit-card {
@@ -1322,6 +1438,7 @@ textarea:focus {
   }
 
   .mode-toggle,
+  .action-scorecard,
   .metric-row,
   .quality-card,
   .persona-list {

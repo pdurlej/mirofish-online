@@ -690,6 +690,7 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "channel": topic.get("channel"),
         "cluster_label": topic.get("cluster_label"),
         "decision": recommendation.get("decision"),
+        "decision_confidence": recommendation.get("decision_confidence"),
         "best_channel": recommendation.get("best_channel"),
         "channel_scores": recommendation.get("channel_scores", []),
         "next_action": recommendation.get("next_action"),
