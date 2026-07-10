@@ -20,7 +20,10 @@ from app.audience import (
 from app.audience.live_runner import (
     PERSONA_JSON_MAX_TOKENS,
     PersonaCallResult,
+    _apply_batch_quality_audit,
     _parse_and_validate,
+    _persona_messages,
+    _prioritize_objections,
     _recommendation_for,
     _reasoning_effort_for_model,
 )
@@ -40,6 +43,8 @@ from app.utils.llm_client import LLMChatResult
 ROOT = Path(__file__).resolve().parents[2]
 VALID_REACTION_JSON = (
     '{"stance":"interested","channel_fit":"linkedin strong",'
+    '"channel_scores":{"linkedin":82,"podcast":70,"blog":64,'
+    '"twitter-x":51,"product-idea":35},'
     '"summary":"This angle is concrete enough for a product audience.",'
     '"objection":"Explain the buyer and practical consequence.",'
     '"objection_severity":"medium",'
@@ -322,6 +327,52 @@ def test_channel_scores_rank_requested_practical_channel():
     assert scores[0]["channel"] == "linkedin"
     assert scores[0]["score"] >= 70
     assert scores[0]["suggested_format"]
+
+
+def test_persona_channel_scores_use_median_and_ignore_requested_channel():
+    reactions = [
+        {
+            "channel_fit": "independent comparison",
+            "channel_scores": {
+                "linkedin": score,
+                "podcast": 61,
+                "blog": 74,
+                "twitter-x": 40,
+                "product-idea": 25,
+            },
+        }
+        for score in (20, 80, 90)
+    ]
+
+    linkedin_requested = build_channel_scores(
+        topic_text="AI eval workflow",
+        requested_channel="linkedin",
+        reactions=reactions,
+    )
+    podcast_requested = build_channel_scores(
+        topic_text="AI eval workflow",
+        requested_channel="podcast",
+        reactions=reactions,
+    )
+
+    assert linkedin_requested == podcast_requested
+    assert next(row for row in linkedin_requested if row["channel"] == "linkedin")[
+        "score"
+    ] == 80
+    assert linkedin_requested[0]["channel"] == "linkedin"
+
+
+def test_persona_prompt_does_not_reveal_requested_channel():
+    run_input = AudienceRunInput(
+        topic="AI eval workflow for product launches",
+        channel="linkedin",
+    )
+    messages = _persona_messages(run_input, load_default_personas()[0])
+    prompt = "\n".join(message["content"] for message in messages)
+
+    assert "Candidate channel" not in prompt
+    assert "requested channel" not in prompt.lower()
+    assert '"channel_scores"' in prompt
 
 
 def _synthetic_research_dataset() -> SyntheticResearchDataset:
@@ -1004,6 +1055,66 @@ def test_live_audience_runner_records_usage_and_receipt():
     assert payload["receipt"]["duplicate_objection_count"] == 19
     assert payload["receipt"]["max_duplicate_objections"] == 20
     assert payload["receipt"]["quality_warnings"][0]["kind"] == "duplicate_objections"
+    assert payload["recommendation"]["channel_scores_source"] == "persona_aggregate"
+    assert len(payload["reactions"][0]["channel_scores"]) == 5
+    assert payload["objections"][0]["drives_next_action"] is True
+    assert (
+        payload["recommendation"]["primary_objection_id"]
+        == payload["objections"][0]["id"]
+    )
+
+
+def test_quality_audit_detects_near_duplicates_and_weak_grounding():
+    receipt = {
+        "reliability_grade": "green",
+        "quality_warnings": [],
+        "duplicate_objection_count": 0,
+        "max_duplicate_objections": 0,
+    }
+    objections = [
+        {
+            "text": "Product ownership for AI delivery lacks a clear engineering boundary.",
+            "severity": "high",
+        },
+        {
+            "text": "Product ownership for AI delivery lacks one clear engineering boundary.",
+            "severity": "medium",
+        },
+        {
+            "text": "The practical consequence is unclear for the audience.",
+            "severity": "low",
+        },
+    ]
+
+    _apply_batch_quality_audit(
+        receipt,
+        objections,
+        topic_text="AI delivery responsibilities for product and engineering teams",
+    )
+
+    assert receipt["near_duplicate_objections"] == 2
+    assert receipt["weak_topic_grounding"] == 1
+    assert receipt["reliability_grade"] == "yellow"
+    assert {warning["kind"] for warning in receipt["quality_warnings"]} == {
+        "near_duplicate_objections",
+        "weak_topic_grounding",
+    }
+
+
+def test_objections_are_sorted_high_to_low_stably():
+    objections = [
+        {"id": "low", "severity": "low"},
+        {"id": "medium-1", "severity": "medium"},
+        {"id": "high", "severity": "high"},
+        {"id": "medium-2", "severity": "medium"},
+    ]
+
+    assert [item["id"] for item in _prioritize_objections(objections)] == [
+        "high",
+        "medium-1",
+        "medium-2",
+        "low",
+    ]
 
 
 def test_live_runner_records_model_routing_in_receipt():
@@ -1347,7 +1458,9 @@ def test_live_recommendation_rewrites_when_skepticism_and_high_objections_domina
 def test_live_runner_normalizes_loose_provider_json():
     parsed = _parse_and_validate(
         '{"reaction":"Wow, this is amazing!","sentiment":"positive",'
-        '"concern":"Explain what changes for Scrum teams in 2026."}'
+        '"concern":"Explain what changes for Scrum teams in 2026.",'
+        '"channel_scores":{"linkedin":75,"podcast":72,"blog":68,'
+        '"twitter-x":45,"product-idea":30}}'
     )
 
     assert parsed["stance"] == "interested"
@@ -1427,6 +1540,13 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
                 parsed={
                     "stance": "interested",
                     "channel_fit": "linkedin strong",
+                    "channel_scores": {
+                        "linkedin": 82,
+                        "podcast": 70,
+                        "blog": 64,
+                        "twitter-x": 51,
+                        "product-idea": 35,
+                    },
                     "summary": "This angle is concrete enough for a product audience.",
                     "objection": "Explain the buyer and practical consequence.",
                     "objection_severity": "medium",

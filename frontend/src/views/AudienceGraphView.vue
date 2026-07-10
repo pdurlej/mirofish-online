@@ -35,22 +35,22 @@
         <input type="search" v-model="searchQuery" placeholder="Search topics…" />
         <span class="count" v-if="searchQuery">{{ visibleTopics.length }} hit{{ visibleTopics.length === 1 ? '' : 's' }}</span>
       </div>
-      <div class="field">
+      <div class="field desktop-filter">
         <label>Min score</label>
         <input class="ctl" type="number" min="0" max="1" step="0.05" v-model.number="minScore" @change="loadGraph" />
       </div>
-      <div class="field">
+      <div class="field desktop-filter">
         <label>Last N</label>
         <input class="ctl" type="number" min="1" max="300" step="10" v-model.number="limit" @change="loadGraph" />
       </div>
-      <div class="field" :class="{ 'is-active': channelFilter !== 'all' }">
+      <div class="field desktop-filter" :class="{ 'is-active': channelFilter !== 'all' }">
         <label>Channel</label>
         <select class="ctl" v-model="channelFilter">
           <option value="all">All channels</option>
           <option v-for="c in channelOptions" :key="c" :value="c">{{ c }}</option>
         </select>
       </div>
-      <div class="field" :class="{ 'is-active': clusterFilter !== 'all' }">
+      <div class="field desktop-filter" :class="{ 'is-active': clusterFilter !== 'all' }">
         <label>Cluster</label>
         <select class="ctl" v-model="clusterFilter">
           <option value="all">All clusters</option>
@@ -58,6 +58,9 @@
         </select>
       </div>
       <div class="tb-actions">
+        <button class="btn sm mobile-filter-trigger" type="button" :aria-expanded="filtersOpen" aria-controls="mobile-graph-filters" @click="filtersOpen = !filtersOpen">
+          <span class="ic" v-html="ICON.sliders"></span>Filters
+        </button>
         <button v-if="activeFilters" class="tb-clear" type="button" @click="clearFilters">Clear ×</button>
         <div class="tb-divider"></div>
         <button class="btn sm" type="button" :class="{ 'is-on': viewOpen }" @click="viewOpen = !viewOpen" title="View options">
@@ -69,6 +72,21 @@
         <button class="btn accent sm" type="button" :disabled="loading" @click="loadGraph">
           <span class="ic" v-html="ICON.refresh"></span>{{ loading ? 'Loading…' : 'Refresh' }}
         </button>
+      </div>
+    </section>
+
+    <section v-if="filtersOpen" id="mobile-graph-filters" class="mobile-filter-panel" aria-label="Graph filters">
+      <label>Min score <input class="ctl" type="number" min="0" max="1" step="0.05" v-model.number="minScore" /></label>
+      <label>Last N <input class="ctl" type="number" min="1" max="300" step="10" v-model.number="limit" /></label>
+      <label>Channel
+        <select class="ctl" v-model="channelFilter"><option value="all">All channels</option><option v-for="c in channelOptions" :key="c" :value="c">{{ c }}</option></select>
+      </label>
+      <label>Cluster
+        <select class="ctl" v-model="clusterFilter"><option value="all">All clusters</option><option v-for="c in clusterOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
+      </label>
+      <div class="mobile-filter-actions">
+        <button class="btn" type="button" @click="clearFilters">Clear</button>
+        <button class="btn accent" type="button" @click="applyMobileFilters">Apply</button>
       </div>
     </section>
 
@@ -124,7 +142,7 @@
 
       <!-- GRAPH CANVAS (hero) -->
       <div ref="canvasWrap" class="canvas-wrap" :class="{ 'show-grid': view.showGrid }">
-        <svg ref="svgEl" class="graph-svg"></svg>
+        <svg ref="svgEl" class="graph-svg" role="group" aria-label="Interactive audience topic graph"></svg>
 
         <div class="canvas-tools">
           <div class="zoom-pill">
@@ -154,10 +172,10 @@
         </div>
 
         <div class="legend" :class="{ collapsed: !legendOpen }">
-          <div class="legend-head" @click="legendOpen = !legendOpen">
+          <button class="legend-head" type="button" :aria-expanded="legendOpen" @click="legendOpen = !legendOpen">
             <h4>Legend</h4>
             <span class="ic" style="color:var(--ink-faint);width:13px;" v-html="legendOpen ? ICON.chevronDown : ICON.chevronUp"></span>
-          </div>
+          </button>
           <div class="legend-body">
             <div class="legend-row"><span class="lg-dot cluster"></span>Cluster anchor</div>
             <div class="legend-row"><span class="lg-dot topic"></span>Topic (test run)</div>
@@ -217,7 +235,7 @@
             <div class="psection" v-if="selectedSimilar.length">
               <div class="sec-label">Top similar topics <em style="font-style:normal;color:var(--ink-faint);">{{ selectedSimilar.length }}</em></div>
               <div class="simlist">
-                <div v-for="(s, i) in selectedSimilar" :key="s.title + i" class="simrow" @click="selectByTitle(s.title)">
+                <button v-for="(s, i) in selectedSimilar" :key="s.title + i" class="simrow" type="button" :aria-label="`Open similar topic ${s.title}, score ${scoreLabel(s.score)}`" @click="selectByTitle(s.title)">
                   <span class="sim-rank">{{ String(i + 1).padStart(2, '0') }}</span>
                   <span class="sim-main">
                     <span class="sim-title">{{ s.title }}</span>
@@ -228,7 +246,7 @@
                     <span class="sim-score">{{ scoreLabel(s.score) }}</span>
                     <span class="sim-method" style="display:block;text-align:right;">{{ s.method || 'lexical' }}</span>
                   </span>
-                </div>
+                </button>
               </div>
             </div>
             <button v-if="selectedNode.run_id" class="btn accent open-run" type="button" @click="openRun(selectedNode)">
@@ -260,11 +278,11 @@
             <div class="psection">
               <div class="sec-label">Member topics</div>
               <div class="member-list">
-                <div v-for="m in clusterMembers(selectedNode.cluster_id)" :key="m.id" class="member" @click="select(m)">
+                <button v-for="m in clusterMembers(selectedNode.cluster_id)" :key="m.id" class="member" type="button" :aria-label="`Open cluster topic ${m.title}`" @click="select(m)">
                   <span class="grade-dot" :class="'grade-' + (m.reliability_grade || 'unknown')"></span>
                   <b>{{ m.title }}</b>
                   <span class="chip" :class="decisionClass(m.decision)" style="font-size:9.5px;">{{ decisionLabel(m.decision) }}</span>
-                </div>
+                </button>
               </div>
             </div>
             <button class="btn open-run" type="button" @click="focusClusterById(selectedNode.cluster_id)">Isolate this cluster</button>
@@ -331,11 +349,11 @@
         </div>
         <div class="tw-row tw-toggle">
           <label style="margin:0;">Cluster halos</label>
-          <div class="tw-switch" :class="{ on: view.clusterHull }" @click="setView('clusterHull', !view.clusterHull)"></div>
+          <button class="tw-switch" type="button" :class="{ on: view.clusterHull }" :aria-pressed="view.clusterHull" aria-label="Toggle cluster halos" @click="setView('clusterHull', !view.clusterHull)"></button>
         </div>
         <div class="tw-row tw-toggle">
           <label style="margin:0;">Background grid</label>
-          <div class="tw-switch" :class="{ on: view.showGrid }" @click="setView('showGrid', !view.showGrid)"></div>
+          <button class="tw-switch" type="button" :class="{ on: view.showGrid }" :aria-pressed="view.showGrid" aria-label="Toggle background grid" @click="setView('showGrid', !view.showGrid)"></button>
         </div>
       </div>
     </div>
@@ -390,6 +408,7 @@ const railVisible = ref(typeof window !== 'undefined' && window.innerWidth > 118
 const panelVisible = ref(true)
 const legendOpen = ref(false)
 const viewOpen = ref(false)
+const filtersOpen = ref(false)
 const tip = reactive({ show: false, node: null, x: 0, y: 0 })
 
 const stored = (() => { try { return JSON.parse(localStorage.getItem('mf_graph_view') || '{}') } catch (e) { return {} } })()
@@ -540,6 +559,10 @@ const focusCluster = (c) => {
 }
 const focusClusterById = (cid) => { clusterFilter.value = cid; selectedNode.value = null }
 const clearFilters = () => { searchQuery.value = ''; channelFilter.value = 'all'; clusterFilter.value = 'all' }
+const applyMobileFilters = async () => {
+  filtersOpen.value = false
+  await loadGraph()
+}
 const resetZoom = () => { if (ctrl) ctrl.resetZoom() }
 const openRun = (node) => { router.push({ name: 'Audience', query: { run: node.run_id } }) }
 
@@ -676,6 +699,7 @@ onBeforeUnmount(() => {
 .field.is-active .ctl { border-color:color-mix(in srgb,var(--accent) 55%,var(--hairline-2)); }
 .graph-page input, .graph-page select { font:inherit; color:var(--ink); background:var(--water-3); border:1px solid var(--hairline-2);
   border-radius:8px; padding:8px 10px; outline:none; transition:border-color .15s, box-shadow .15s; }
+.graph-page .tb-search input { padding:9px 64px 9px 34px; }
 .graph-page input:focus, .graph-page select:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent); }
 .graph-page input[type='number'] { width:78px; }
 .graph-page select { width:148px; cursor:pointer; -webkit-appearance:none; appearance:none;
@@ -685,6 +709,12 @@ onBeforeUnmount(() => {
 .tb-actions { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .tb-clear { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); background:none; border:none; cursor:pointer; padding:6px 8px; letter-spacing:.04em; }
 .tb-clear:hover { text-decoration:underline; }
+.mobile-filter-trigger,
+.mobile-filter-panel { display:none; }
+.mobile-filter-panel { flex:0 0 auto; padding:12px 14px; border-bottom:1px solid var(--hairline-2); background:var(--panel-2); }
+.mobile-filter-panel label { display:grid; gap:6px; color:var(--ink-faint); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+.mobile-filter-panel .ctl { width:100%; }
+.mobile-filter-actions { display:flex; justify-content:flex-end; gap:8px; grid-column:1 / -1; }
 
 /* ============================ WORKBENCH ============================ */
 .workbench { flex:1 1 auto; min-height:0; position:relative; display:grid;
@@ -760,7 +790,7 @@ onBeforeUnmount(() => {
 .err-mark { width:46px; height:46px; margin:0 auto; border-radius:50%; display:grid; place-items:center; color:var(--bad); border:1.5px solid color-mix(in srgb,var(--bad) 55%,transparent); }
 
 .legend { position:absolute; left:12px; bottom:12px; z-index:5; background:var(--panel); border:1px solid var(--hairline); border-radius:11px; padding:11px 13px; box-shadow:var(--shadow); min-width:190px; }
-.legend-head { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; }
+.legend-head { display:flex; width:100%; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; padding:0; border:0; background:none; color:inherit; }
 .legend-head h4 { margin:0; font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); font-weight:700; }
 .legend-body { margin-top:10px; display:grid; gap:7px; }
 .legend.collapsed .legend-body { display:none; }
@@ -793,7 +823,7 @@ onBeforeUnmount(() => {
 .next-action .ic { color:var(--accent); flex:0 0 auto; margin-top:1px; }
 .next-action p { margin:0; line-height:1.45; font-size:13px; }
 .simlist { display:flex; flex-direction:column; }
-.simrow { display:grid; grid-template-columns:18px 1fr auto; gap:10px; align-items:center; padding:9px 0; border-top:1px solid var(--hairline); cursor:pointer; }
+.simrow { display:grid; width:100%; grid-template-columns:18px 1fr auto; gap:10px; align-items:center; padding:9px 0; border:0; border-top:1px solid var(--hairline); background:none; color:inherit; text-align:left; cursor:pointer; }
 .simrow:first-child { border-top:none; }
 .simrow:hover .sim-title { color:var(--accent); }
 .sim-rank { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-faint); }
@@ -805,7 +835,7 @@ onBeforeUnmount(() => {
 .sim-score { font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-dim); text-align:right; }
 .sim-method { font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
 .member-list { display:flex; flex-direction:column; gap:1px; }
-.member { display:flex; align-items:center; gap:9px; padding:8px 8px; border-radius:8px; cursor:pointer; }
+.member { display:flex; width:100%; align-items:center; gap:9px; padding:8px 8px; border:0; border-radius:8px; background:none; color:inherit; text-align:left; cursor:pointer; }
 .member:hover { background:var(--water-3); }
 .member b { font-size:12.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1; }
 .open-run { width:100%; justify-content:center; margin-top:20px; padding:12px; }
@@ -835,6 +865,9 @@ onBeforeUnmount(() => {
 .graph-page input[type='range']::-moz-range-thumb { width:16px; height:16px; border:none; border-radius:50%; background:var(--accent); cursor:pointer; }
 .tw-toggle { display:flex; align-items:center; justify-content:space-between; }
 .tw-switch { width:40px; height:23px; border-radius:20px; background:var(--water-3); border:1px solid var(--hairline-2); position:relative; cursor:pointer; transition:background .16s; flex:0 0 auto; }
+.btn:focus-visible, .cluster-row:focus-visible, .simrow:focus-visible, .member:focus-visible, .legend-head:focus-visible, .tw-switch:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+:deep(.mf-node:focus-visible) { outline:none; }
+:deep(.mf-node:focus-visible .mf-topic-dot), :deep(.mf-node:focus-visible .mf-cluster-core) { stroke:var(--accent); stroke-width:4; filter:url(#mf-glow-strong); }
 .tw-switch:after { content:''; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:var(--ink-dim); transition:transform .16s, background .16s; }
 .tw-switch.on { background:color-mix(in srgb,var(--accent) 35%,var(--water-3)); border-color:var(--accent); }
 .tw-switch.on:after { transform:translateX(17px); background:var(--accent); }
@@ -871,12 +904,22 @@ onBeforeUnmount(() => {
   .canvas-wrap { height:62vh; min-height:380px; }
   .panel { border-left:none; border-top:1px solid var(--hairline-2); }
   .panel-collapsed .panel { display:block; }
-  .toolbar { flex-wrap:nowrap; overflow-x:auto; }
+  .toolbar { flex-wrap:nowrap; overflow:visible; }
+  .toolbar > .desktop-filter { display:none; }
+  .mobile-filter-trigger { display:inline-flex; }
+  .mobile-filter-panel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .tb-search { min-width:0; max-width:none; }
+  .tb-actions .tb-divider, .tb-actions .tb-clear { display:none; }
   .gnav-stats .gstat:first-child { border-left:none; }
   .tweaks { left:12px; right:12px; width:auto; }
 }
 @media (max-width:560px) {
   .gnav-stats { display:none; }
   .gnav-links .label-hide { display:none; }
+  .toolbar { padding:9px 10px; gap:7px; }
+  .toolbar > .btn:first-child { display:none; }
+  .tb-actions .btn:not(.mobile-filter-trigger) { display:none; }
+  .mobile-filter-panel { grid-template-columns:1fr; }
+  .mobile-filter-actions { grid-column:auto; }
 }
 </style>

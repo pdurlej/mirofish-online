@@ -6,6 +6,7 @@ against it later without making the core report depend on another provider.
 
 from __future__ import annotations
 
+from statistics import median
 from typing import Any
 
 CHANNELS = ("linkedin", "podcast", "blog", "twitter-x", "product-idea")
@@ -99,6 +100,10 @@ def build_channel_scores(
     reactions: list[dict[str, Any]] | None = None,
     objections: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    persona_scores = _persona_channel_score_rows(reactions or [])
+    if persona_scores:
+        return _aggregate_persona_channel_scores(persona_scores)
+
     text = f"{title or ''} {topic_text or ''}".lower()
     scores = {channel: 34.0 for channel in CHANNELS}
     evidence: dict[str, list[str]] = {channel: [] for channel in CHANNELS}
@@ -130,6 +135,10 @@ def build_channel_scores(
     return sorted(result, key=lambda item: (-int(item["score"]), item["channel"]))
 
 
+def channel_scores_source(reactions: list[dict[str, Any]] | None) -> str:
+    return "persona_aggregate" if _persona_channel_score_rows(reactions or []) else "legacy_heuristic"
+
+
 def top_channel(channel_scores: list[dict[str, Any]]) -> str:
     if not channel_scores:
         return "unknown"
@@ -139,6 +148,11 @@ def top_channel(channel_scores: list[dict[str, Any]]) -> str:
 def enrich_payload_channel_scores(payload: dict[str, Any]) -> dict[str, Any]:
     recommendation = payload.get("recommendation") or {}
     if recommendation.get("channel_scores"):
+        recommendation.setdefault(
+            "channel_scores_source",
+            channel_scores_source(list(payload.get("reactions") or [])),
+        )
+        payload["recommendation"] = recommendation
         return payload
 
     topic = payload.get("topic") or {}
@@ -152,8 +166,53 @@ def enrich_payload_channel_scores(payload: dict[str, Any]) -> dict[str, Any]:
     )
     recommendation["channel_scores"] = channel_scores
     recommendation["best_channel"] = recommendation.get("best_channel") or top_channel(channel_scores)
+    recommendation["channel_scores_source"] = "legacy_heuristic"
     payload["recommendation"] = recommendation
     return payload
+
+
+def _persona_channel_score_rows(
+    reactions: list[dict[str, Any]],
+) -> list[dict[str, int]]:
+    rows: list[dict[str, int]] = []
+    for reaction in reactions:
+        raw = reaction.get("channel_scores")
+        if not isinstance(raw, dict) or any(channel not in raw for channel in CHANNELS):
+            continue
+        try:
+            row = {
+                channel: int(max(0, min(100, round(float(raw[channel])))))
+                for channel in CHANNELS
+            }
+        except (TypeError, ValueError):
+            continue
+        rows.append(row)
+    return rows
+
+
+def _aggregate_persona_channel_scores(
+    rows: list[dict[str, int]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for channel in CHANNELS:
+        values = [row[channel] for row in rows]
+        score = int(round(median(values)))
+        spread = max(values) - min(values)
+        confidence = round(
+            _clamp(0.45 + min(len(rows), 20) * 0.02 + max(0, 30 - spread) * 0.005, 0.35, 0.95),
+            2,
+        )
+        result.append(
+            {
+                "channel": channel,
+                "label": CHANNEL_LABELS[channel],
+                "score": score,
+                "confidence": confidence,
+                "rationale": f"Median of {len(rows)} independent persona channel scores.",
+                "suggested_format": SUGGESTED_FORMATS[channel],
+            }
+        )
+    return sorted(result, key=lambda item: (-int(item["score"]), item["channel"]))
 
 
 def _apply_persona_preferences(

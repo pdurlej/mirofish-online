@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from ..utils.llm_client import LLMClient, LLMChatResult, validate_json_schema
 from .audience_run import AudienceRunInput, AudienceRunResult
-from .channel_fit import build_channel_scores, top_channel
+from .channel_fit import CHANNELS, build_channel_scores, channel_scores_source, top_channel
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
 from .similarity import (
@@ -29,6 +29,7 @@ REACTION_SCHEMA: dict[str, Any] = {
     "required": [
         "stance",
         "channel_fit",
+        "channel_scores",
         "summary",
         "objection",
         "objection_severity",
@@ -41,6 +42,15 @@ REACTION_SCHEMA: dict[str, Any] = {
             "enum": ["interested", "curious", "skeptical", "needs_translation"],
         },
         "channel_fit": {"type": "string", "minLength": 3},
+        "channel_scores": {
+            "type": "object",
+            "required": list(CHANNELS),
+            "properties": {
+                channel: {"type": "integer", "minimum": 0, "maximum": 100}
+                for channel in CHANNELS
+            },
+            "additionalProperties": False,
+        },
         "summary": {"type": "string", "minLength": 12},
         "objection": {"type": "string", "minLength": 8},
         "objection_severity": {
@@ -211,6 +221,7 @@ class AudienceLiveRunner:
                             "persona_id": persona.id,
                             "stance": parsed["stance"],
                             "channel_fit": parsed["channel_fit"],
+                            "channel_scores": parsed["channel_scores"],
                             "model": call.metadata.model,
                             "summary": parsed["summary"],
                         }
@@ -281,7 +292,11 @@ class AudienceLiveRunner:
         receipt["failed_persona_count"] = len(failures)
         receipt["failure_rate"] = round(len(failures) / len(active_personas), 3)
         receipt["reliability_grade"] = _reliability_grade(receipt["failure_rate"])
-        _apply_batch_quality_audit(receipt, objections)
+        _apply_batch_quality_audit(
+            receipt,
+            objections,
+            topic_text=f"{run_input.display_title} {run_input.topic}",
+        )
 
         if receipt["failure_rate"] > self._failure_threshold:
             raise AudienceRunFailed(
@@ -312,6 +327,12 @@ class AudienceLiveRunner:
         assign_topic_cluster(topic, similarity_edges)
         persona_memory = build_persona_memory(personas_payload, similarity_edges, previous)
 
+        objections = _prioritize_objections(objections)
+        recommendation = _recommendation_for(run_input, reactions, objections)
+        primary_objection_id = recommendation.get("primary_objection_id")
+        for objection in objections:
+            objection["drives_next_action"] = objection.get("id") == primary_objection_id
+
         return AudienceRunResult(
             run_id=run_id,
             created_at=created_at,
@@ -320,7 +341,7 @@ class AudienceLiveRunner:
             reactions=reactions,
             objections=objections,
             insights=_select_insights(insights),
-            recommendation=_recommendation_for(run_input, reactions, objections),
+            recommendation=recommendation,
             similarity_edges=similarity_edges,
             persona_memory=persona_memory,
             receipt=receipt,
@@ -485,7 +506,9 @@ class AudienceLiveRunner:
 def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
     contract = (
         'Return exactly one JSON object with these keys: "stance", "channel_fit", '
-        '"summary", "objection", "objection_severity", "insight", "decision_impact". '
+        '"channel_scores", "summary", "objection", "objection_severity", "insight", '
+        '"decision_impact". "channel_scores" must contain integer 0-100 scores for '
+        '"linkedin", "podcast", "blog", "twitter-x", and "product-idea". '
         'The first character must be "{" and the last character must be "}". '
         "Use double quotes, no markdown, no prose, no arrays, no comments. "
         "If the submitted topic is Polish, write JSON string values in Polish."
@@ -511,11 +534,11 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
                 f"Known objections: {'; '.join(persona.objections)}\n"
                 f"Channel preferences: {', '.join(persona.channel_preferences)}\n"
                 f"Skepticism: {persona.skepticism}\n\n"
-                f"Candidate channel: {run_input.channel}\n"
                 f"Title: {run_input.display_title}\n"
                 f"Topic/draft:\n{run_input.topic}\n\n"
-                "Judge whether this should become a podcast, LinkedIn post, blog, "
-                "Twitter/X post, product idea, or be narrowed/rewritten.\n\n"
+                "Score every channel independently before comparing them. Judge whether "
+                "this should become a podcast, LinkedIn post, blog, Twitter/X post, product "
+                "idea, or be narrowed/rewritten.\n\n"
                 f"{contract}"
             ),
         },
@@ -580,9 +603,15 @@ def _normalize_loose_response(value: Any) -> dict[str, Any]:
         or value.get("takeaway")
         or "Frame the idea through a concrete audience decision."
     )
+    raw_channel_scores = value.get("channel_scores")
+    if raw_channel_scores is None and str(objection).strip().lower() in GENERIC_OBJECTION_FALLBACKS:
+        normalized_channel_scores = {channel: 50 for channel in CHANNELS}
+    else:
+        normalized_channel_scores = _normalize_channel_scores(raw_channel_scores)
     return {
         "stance": _normalize_stance(str(value.get("stance") or value.get("sentiment") or "")),
         "channel_fit": str(value.get("channel_fit") or value.get("channel") or "unknown fit"),
+        "channel_scores": normalized_channel_scores,
         "summary": _min_text(str(summary), "The persona gave a short, loosely structured reaction."),
         "objection": _min_text(str(objection), "This needs a clearer practical consequence."),
         "objection_severity": _normalize_severity(str(value.get("objection_severity") or value.get("severity") or "")),
@@ -592,6 +621,21 @@ def _normalize_loose_response(value: Any) -> dict[str, Any]:
             "Use this as a weak signal and compare it with stronger persona reactions.",
         ),
     }
+
+
+def _normalize_channel_scores(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError("schema_error:$.channel_scores:expected object")
+    scores: dict[str, int] = {}
+    for channel in CHANNELS:
+        try:
+            score = int(round(float(value[channel])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"schema_error:$.channel_scores.{channel}:expected integer"
+            ) from exc
+        scores[channel] = max(0, min(100, score))
+    return scores
 
 
 def _validate_reaction_quality(parsed: dict[str, Any]) -> None:
@@ -655,6 +699,8 @@ def _empty_live_receipt() -> dict[str, Any]:
         "quality_warnings": [],
         "duplicate_objection_count": 0,
         "max_duplicate_objections": 0,
+        "near_duplicate_objections": 0,
+        "weak_topic_grounding": 0,
         "run_timed_out": False,
         "failed_persona_count": 0,
         "low_quality_persona_count": 0,
@@ -724,27 +770,62 @@ def _record_failure(receipt: dict[str, Any], model: str) -> None:
     model_entry["failures"] += 1
 
 
-def _apply_batch_quality_audit(receipt: dict[str, Any], objections: list[dict[str, Any]]) -> None:
+def _apply_batch_quality_audit(
+    receipt: dict[str, Any],
+    objections: list[dict[str, Any]],
+    *,
+    topic_text: str,
+) -> None:
     duplicates = _duplicate_objection_stats(objections)
     receipt["duplicate_objection_count"] = duplicates["duplicate_objection_count"]
     receipt["max_duplicate_objections"] = duplicates["max_duplicate_objections"]
-    if duplicates["max_duplicate_objections"] <= MAX_GREEN_DUPLICATE_OBJECTION_COUNT:
-        return
+    if duplicates["max_duplicate_objections"] > MAX_GREEN_DUPLICATE_OBJECTION_COUNT:
+        receipt.setdefault("quality_warnings", []).append(
+            {
+                "kind": "duplicate_objections",
+                "message": (
+                    "Multiple personas returned the same objection; treat the run as lower confidence."
+                ),
+                "duplicate_objection_count": duplicates["duplicate_objection_count"],
+                "max_duplicate_objections": duplicates["max_duplicate_objections"],
+            }
+        )
+        _lower_reliability(
+            receipt,
+            "red"
+            if duplicates["max_duplicate_objections"]
+            > MAX_YELLOW_DUPLICATE_OBJECTION_COUNT
+            else "yellow",
+        )
 
-    warning = {
-        "kind": "duplicate_objections",
-        "message": (
-            "Multiple personas returned the same objection; treat the run as lower confidence."
-        ),
-        "duplicate_objection_count": duplicates["duplicate_objection_count"],
-        "max_duplicate_objections": duplicates["max_duplicate_objections"],
-    }
-    receipt.setdefault("quality_warnings", []).append(warning)
-    if duplicates["max_duplicate_objections"] > MAX_YELLOW_DUPLICATE_OBJECTION_COUNT:
-        receipt["reliability_grade"] = "red"
-        return
-    if receipt.get("reliability_grade") == "green":
-        receipt["reliability_grade"] = "yellow"
+    near_duplicate_count = _near_duplicate_objection_count(objections)
+    receipt["near_duplicate_objections"] = near_duplicate_count
+    if near_duplicate_count:
+        receipt.setdefault("quality_warnings", []).append(
+            {
+                "kind": "near_duplicate_objections",
+                "message": "Several objections are near-duplicates despite different wording.",
+                "count": near_duplicate_count,
+            }
+        )
+        _lower_reliability(receipt, "red" if near_duplicate_count >= 6 else "yellow")
+
+    weak_grounding_count = sum(
+        1
+        for objection in objections
+        if not _is_topic_grounded(str(objection.get("text") or ""), topic_text)
+    )
+    receipt["weak_topic_grounding"] = weak_grounding_count
+    if weak_grounding_count:
+        receipt.setdefault("quality_warnings", []).append(
+            {
+                "kind": "weak_topic_grounding",
+                "message": "Some objections do not reference a concrete part of the topic.",
+                "count": weak_grounding_count,
+            }
+        )
+        weak_share = weak_grounding_count / max(len(objections), 1)
+        _lower_reliability(receipt, "red" if weak_share > 0.4 else "yellow")
 
 
 def _duplicate_objection_stats(objections: list[dict[str, Any]]) -> dict[str, int]:
@@ -767,6 +848,71 @@ def _normalize_objection_for_duplicate_check(value: Any) -> str:
     text = str(value or "").casefold()
     text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
     return " ".join(text.split())
+
+
+def _near_duplicate_objection_count(objections: list[dict[str, Any]]) -> int:
+    normalized = [
+        _normalize_objection_for_duplicate_check(objection.get("text"))
+        for objection in objections
+    ]
+    token_sets = [set(text.split()) for text in normalized]
+    matched: set[int] = set()
+    for left_index, left in enumerate(token_sets):
+        if len(left) < 4:
+            continue
+        for right_index in range(left_index + 1, len(token_sets)):
+            right = token_sets[right_index]
+            if normalized[left_index] == normalized[right_index] or len(right) < 4:
+                continue
+            overlap = len(left & right) / max(len(left | right), 1)
+            if overlap >= 0.72:
+                matched.update((left_index, right_index))
+    return len(matched)
+
+
+GROUNDING_STOPWORDS = {
+    "about",
+    "audience",
+    "because",
+    "brakuje",
+    "clear",
+    "concrete",
+    "dlaczego",
+    "explain",
+    "idea",
+    "jak",
+    "jest",
+    "konkretny",
+    "need",
+    "needs",
+    "practical",
+    "show",
+    "temat",
+    "this",
+    "what",
+    "why",
+}
+
+
+def _grounding_tokens(value: str) -> set[str]:
+    normalized = _normalize_objection_for_duplicate_check(value)
+    return {
+        token if len(token) <= 4 else token[:6]
+        for token in normalized.split()
+        if (len(token) >= 4 or token in {"ai", "cd", "ci", "llm", "pm", "qa", "roi"})
+        and token not in GROUNDING_STOPWORDS
+    }
+
+
+def _is_topic_grounded(objection: str, topic_text: str) -> bool:
+    return bool(_grounding_tokens(objection) & _grounding_tokens(topic_text))
+
+
+def _lower_reliability(receipt: dict[str, Any], target: str) -> None:
+    rank = {"unknown": 0, "green": 1, "test": 1, "yellow": 2, "red": 3}
+    current = str(receipt.get("reliability_grade") or "unknown")
+    if rank.get(target, 0) > rank.get(current, 0):
+        receipt["reliability_grade"] = target
 
 
 def _ensure_success_attempts(
@@ -823,7 +969,10 @@ def _recommendation_for(
         question_driven=question_driven,
     )
     decision = action_scorecard[0]["decision"]
-    top_objection = _representative_objection(objections)
+    top_objection_record = _representative_objection_record(objections)
+    top_objection = _truncate_sentence(
+        str(top_objection_record.get("text") or "No strong objection was captured.")
+    )
     polish = _is_likely_polish(run_input.topic)
     return {
         "decision": decision,
@@ -831,6 +980,9 @@ def _recommendation_for(
         "action_scorecard": action_scorecard,
         "best_channel": best_channel,
         "channel_scores": channel_scores,
+        "channel_scores_source": channel_scores_source(reactions),
+        "requested_channel": run_input.channel,
+        "primary_objection_id": top_objection_record.get("id"),
         "next_action": _next_action(decision, best_channel, top_objection, polish=polish),
         "rationale": _recommendation_rationale(
             decision,
@@ -1013,12 +1165,29 @@ def _recommendation_rationale(
     return f"Decision {decision}: {driver_text}; strongest objection: {top_objection}"
 
 
-def _representative_objection(objections: list[dict[str, Any]]) -> str:
+def _representative_objection_record(
+    objections: list[dict[str, Any]],
+) -> dict[str, Any]:
     if not objections:
-        return "No strong objection was captured."
+        return {"id": None, "text": "No strong objection was captured.", "severity": "low"}
     preferred = [objection for objection in objections if objection.get("severity") == "high"]
-    text = str((preferred or objections)[0].get("text") or "").strip()
+    return (preferred or objections)[0]
+
+
+def _representative_objection(objections: list[dict[str, Any]]) -> str:
+    objection = _representative_objection_record(objections)
+    text = str(objection.get("text") or "").strip()
     return _truncate_sentence(text or "No strong objection was captured.")
+
+
+def _prioritize_objections(
+    objections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    return sorted(
+        objections,
+        key=lambda objection: severity_rank.get(str(objection.get("severity")), 3),
+    )
 
 
 def _truncate_sentence(text: str, limit: int = 180) -> str:

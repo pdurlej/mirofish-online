@@ -39,8 +39,8 @@
         </aside>
       </section>
 
-      <section class="audience-grid">
-        <form class="run-panel" @submit.prevent="submitRun">
+      <section class="audience-grid" :class="{ 'report-mode': reportMode }">
+        <form v-show="!reportMode" class="run-panel" @submit.prevent="submitRun">
           <div class="panel-head">
             <div>
               <p class="eyebrow">Run setup</p>
@@ -105,13 +105,16 @@
           </div>
 
           <div v-else class="result-stack">
+            <button v-if="reportMode" class="new-run-button" type="button" @click="startNewRun">
+              ← New audience run
+            </button>
             <div class="decision-card">
               <div class="decision-card-head">
                 <span class="decision-pill" :class="`decision-${recommendation.decision || 'unknown'}`">
                   {{ recommendation.decision || 'unknown' }}
                 </span>
                 <span v-if="decisionConfidenceLabel" class="decision-confidence">
-                  {{ decisionConfidenceLabel }} confidence
+                  Recommendation strength {{ decisionConfidenceLabel }}
                 </span>
               </div>
               <h2>{{ recommendation.next_action || 'No next action recorded.' }}</h2>
@@ -140,6 +143,7 @@
                 <div>
                   <h3>Channel fit</h3>
                   <p>Where this idea is most likely to work next.</p>
+                  <small class="score-source">{{ channelScoreSourceLabel }}</small>
                 </div>
                 <span v-if="topChannel" class="channel-badge">
                   Recommended: {{ topChannel.label }}
@@ -182,31 +186,22 @@
                 <span>similar</span>
               </div>
               <div>
-                <strong>{{ receipt.usage?.total_tokens || 0 }}</strong>
-                <span>tokens</span>
-              </div>
-              <div>
                 <strong>{{ reliabilityLabel }}</strong>
                 <span>reliability</span>
-              </div>
-              <div>
-                <strong>{{ receipt.pricing || 'unknown' }}</strong>
-                <span>pricing</span>
               </div>
             </div>
 
             <section class="quality-card" :class="{ warning: qualityWarnings.length }">
-              <div>
-                <span>Model path</span>
-                <strong>{{ modelPoolLabel }}</strong>
-                <small v-if="retryModelLabel">Retry: {{ retryModelLabel }}</small>
-              </div>
               <div>
                 <span>Quality check</span>
                 <strong>{{ qualityWarnings.length ? 'low confidence' : 'clear' }}</strong>
                 <small>
                   duplicates {{ receipt.duplicate_objection_count || 0 }} · max same
                   {{ receipt.max_duplicate_objections || 0 }}
+                </small>
+                <small>
+                  near-duplicates {{ receipt.near_duplicate_objections || 0 }} · weak grounding
+                  {{ receipt.weak_topic_grounding || 0 }}
                 </small>
               </div>
             </section>
@@ -245,14 +240,22 @@
               <ul class="objection-list">
                 <li v-for="item in topObjections" :key="item.id">
                   <span>{{ item.severity }}</span>
+                  <b v-if="item.drives_next_action" class="action-driver">drives next action</b>
                   {{ item.text }}
                 </li>
               </ul>
             </section>
 
-            <section class="result-section">
-              <h3>Model attribution</h3>
-              <div class="persona-list">
+            <details class="diagnostics">
+              <summary>Diagnostics</summary>
+              <div class="diagnostic-grid">
+                <div><span>Run ID</span><strong>{{ result.run_id || 'unknown' }}</strong></div>
+                <div><span>Tokens</span><strong>{{ receipt.usage?.total_tokens || 0 }}</strong></div>
+                <div><span>Pricing</span><strong>{{ receipt.pricing || 'unknown' }}</strong></div>
+                <div><span>Model path</span><strong>{{ modelPoolLabel }}</strong></div>
+                <div v-if="retryModelLabel"><span>Retry model</span><strong>{{ retryModelLabel }}</strong></div>
+              </div>
+              <div class="persona-list diagnostics-personas">
                 <div v-for="persona in personas.slice(0, 10)" :key="persona.id">
                   <strong>{{ persona.name }}</strong>
                   <span>{{ persona.model_assignment?.model || 'unknown' }}</span>
@@ -264,7 +267,7 @@
                   </small>
                 </div>
               </div>
-            </section>
+            </details>
           </div>
         </section>
       </section>
@@ -277,25 +280,40 @@
           </div>
           <button class="small-button" type="button" @click="loadHistory">Refresh</button>
         </div>
-        <div v-if="history.length === 0" class="history-empty">
+        <div class="history-filters">
+          <input v-model="historySearch" type="search" placeholder="Search runs, clusters, similar topics…" aria-label="Search run history" />
+          <select v-model="historyDecision" aria-label="Filter by decision">
+            <option value="all">All decisions</option>
+            <option v-for="value in historyDecisionOptions" :key="value" :value="value">{{ value }}</option>
+          </select>
+          <select v-model="historyChannel" aria-label="Filter by channel">
+            <option value="all">All channels</option>
+            <option v-for="value in historyChannelOptions" :key="value" :value="value">{{ value }}</option>
+          </select>
+          <select v-model="historyReliability" aria-label="Filter by reliability">
+            <option value="all">All reliability</option>
+            <option v-for="value in historyReliabilityOptions" :key="value" :value="value">{{ value }}</option>
+          </select>
+          <select v-model="historyCluster" aria-label="Filter by cluster">
+            <option value="all">All clusters</option>
+            <option v-for="value in historyClusterOptions" :key="value" :value="value">{{ value }}</option>
+          </select>
+        </div>
+        <div v-if="filteredHistory.length === 0" class="history-empty">
           No previous audience runs yet.
         </div>
         <div v-else class="history-list">
           <button
-            v-for="item in history"
+            v-for="item in filteredHistory"
             :key="item.run_id"
             class="history-item"
             type="button"
             @click="loadRun(item.run_id)"
           >
             <strong>{{ item.title || item.run_id }}</strong>
-            <span>{{ item.channel }} · {{ item.decision || 'pending' }} · {{ item.total_tokens || 0 }} tokens</span>
-            <span v-if="historyDecisionConfidence(item)">Action confidence: {{ historyDecisionConfidence(item) }}</span>
+            <span>{{ item.decision || 'pending' }}</span>
+            <span v-if="historyDecisionConfidence(item)">Strength: {{ historyDecisionConfidence(item) }}</span>
             <span v-if="historyChannelLabel(item)">Best: {{ historyChannelLabel(item) }}</span>
-            <span>{{ item.reliability_grade || 'unknown' }} · {{ item.similarity_count || 0 }} similar</span>
-            <span v-if="historyModelLabel(item)">Model: {{ historyModelLabel(item) }}</span>
-            <span v-if="historyQualityLabel(item)" class="history-warning">{{ historyQualityLabel(item) }}</span>
-            <span v-if="item.cluster_label">Cluster: {{ item.cluster_label }}</span>
             <span v-if="similarTopicsLabel(item)">Similar: {{ similarTopicsLabel(item) }}</span>
           </button>
         </div>
@@ -325,6 +343,12 @@ const personaCount = ref(20)
 const runMode = ref('live')
 const runStatus = ref('')
 const history = ref([])
+const reportMode = ref(false)
+const historySearch = ref('')
+const historyDecision = ref('all')
+const historyChannel = ref('all')
+const historyReliability = ref('all')
+const historyCluster = ref('all')
 
 const form = reactive({
   title: '',
@@ -337,7 +361,17 @@ const recommendation = computed(() => result.value?.recommendation || {})
 const reactions = computed(() => result.value?.reactions || [])
 const objections = computed(() => result.value?.objections || [])
 const personas = computed(() => result.value?.personas || [])
-const topObjections = computed(() => objections.value.slice(0, 6))
+const topObjections = computed(() => {
+  const severity = { high: 0, medium: 1, low: 2 }
+  return [...objections.value]
+    .sort((left, right) => {
+      if (Boolean(left.drives_next_action) !== Boolean(right.drives_next_action)) {
+        return left.drives_next_action ? -1 : 1
+      }
+      return (severity[left.severity] ?? 3) - (severity[right.severity] ?? 3)
+    })
+    .slice(0, 6)
+})
 const receipt = computed(() => result.value?.receipt || {})
 const reliabilityLabel = computed(() => receipt.value.reliability_grade || 'unknown')
 const similarityEdges = computed(() => result.value?.similarity_edges || [])
@@ -370,6 +404,30 @@ const channelScores = computed(() => {
     .sort((a, b) => b.score - a.score)
 })
 const topChannel = computed(() => channelScores.value[0] || null)
+const channelScoreSourceLabel = computed(() => {
+  return recommendation.value?.channel_scores_source === 'persona_aggregate'
+    ? 'Median of independent persona ratings'
+    : 'Legacy heuristic estimate'
+})
+const historyDecisionOptions = computed(() => uniqueHistoryValues('decision'))
+const historyChannelOptions = computed(() => uniqueHistoryValues('channel'))
+const historyReliabilityOptions = computed(() => uniqueHistoryValues('reliability_grade'))
+const historyClusterOptions = computed(() => uniqueHistoryValues('cluster_label'))
+const filteredHistory = computed(() => {
+  const query = historySearch.value.trim().toLowerCase()
+  return history.value.filter((item) => {
+    const searchable = [
+      item.title,
+      item.cluster_label,
+      ...(item.similar_topics || []).map((topic) => topic.title)
+    ].filter(Boolean).join(' ').toLowerCase()
+    return (!query || searchable.includes(query)) &&
+      (historyDecision.value === 'all' || item.decision === historyDecision.value) &&
+      (historyChannel.value === 'all' || item.channel === historyChannel.value) &&
+      (historyReliability.value === 'all' || item.reliability_grade === historyReliability.value) &&
+      (historyCluster.value === 'all' || item.cluster_label === historyCluster.value)
+  })
+})
 const personaMemoryById = computed(() => {
   const pairs = (result.value?.persona_memory || []).map((item) => [item.persona_id, item])
   return new Map(pairs)
@@ -397,7 +455,7 @@ const loadPersonas = async () => {
 
 const loadHistory = async () => {
   try {
-    const response = await listAudienceRuns(25)
+    const response = await listAudienceRuns(100)
     history.value = response.data || []
   } catch (_err) {
     history.value = []
@@ -409,6 +467,7 @@ const submitRun = async () => {
   loading.value = true
   error.value = ''
   runStatus.value = ''
+  reportMode.value = false
   try {
     const payload = {
       title: form.title,
@@ -457,7 +516,8 @@ const loadRun = async (runId) => {
     const response = await getAudienceRun(runId)
     const record = response.data
     result.value = record.data || record
-    runStatus.value = `Loaded ${runId}`
+    reportMode.value = true
+    runStatus.value = 'Saved run loaded.'
   } catch (err) {
     error.value = err?.message || 'Could not load run'
   } finally {
@@ -466,6 +526,17 @@ const loadRun = async (runId) => {
 }
 
 const memoryForPersona = (personaId) => personaMemoryById.value.get(personaId) || {}
+
+const startNewRun = () => {
+  reportMode.value = false
+  result.value = null
+  runStatus.value = ''
+  router.replace({ name: 'Audience' })
+}
+
+const uniqueHistoryValues = (key) => {
+  return [...new Set(history.value.map((item) => item[key]).filter(Boolean).map(String))].sort()
+}
 
 const scoreLabel = (score) => {
   const numeric = Number(score)
@@ -754,6 +825,20 @@ const trimText = (text, limit) => {
   grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
   gap: 22px;
   align-items: start;
+}
+
+.audience-grid.report-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.new-run-button {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--mf-accent);
+  font: inherit;
+  cursor: pointer;
 }
 
 .run-panel,
@@ -1075,6 +1160,13 @@ textarea:focus {
   color: var(--mf-ink-faint);
 }
 
+.score-source {
+  display: block;
+  margin-top: 6px;
+  color: var(--mf-ink-faint);
+  font-family: var(--mf-font-mono);
+}
+
 .channel-badge {
   flex-shrink: 0;
   border: 1px solid rgba(56, 225, 255, 0.36);
@@ -1184,7 +1276,7 @@ textarea:focus {
 .quality-card {
   padding: 14px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -1307,6 +1399,66 @@ textarea:focus {
   font-size: 0.76rem;
 }
 
+.action-driver {
+  display: inline-flex;
+  margin-right: 8px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(102, 242, 167, 0.12);
+  color: var(--mf-green);
+  font-family: var(--mf-font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.diagnostics {
+  border: 1px solid rgba(132, 184, 209, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.diagnostics summary {
+  padding: 14px 16px;
+  color: var(--mf-ink-muted);
+  cursor: pointer;
+  font-family: var(--mf-font-mono);
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.diagnostic-grid div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(132, 184, 209, 0.12);
+  border-radius: 12px;
+}
+
+.diagnostic-grid span,
+.diagnostic-grid strong {
+  display: block;
+}
+
+.diagnostic-grid span {
+  color: var(--mf-ink-faint);
+  font-family: var(--mf-font-mono);
+  font-size: 0.72rem;
+}
+
+.diagnostic-grid strong {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  font-size: 0.84rem;
+}
+
+.diagnostics-personas {
+  padding: 0 16px 16px;
+}
+
 .persona-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1336,6 +1488,24 @@ textarea:focus {
 
 .history-panel {
   margin-top: 22px;
+}
+
+.history-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.history-filters input,
+.history-filters select {
+  min-width: 0;
+  height: 42px;
+  border: 1px solid rgba(132, 184, 209, 0.2);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: rgba(3, 10, 18, 0.56);
+  color: var(--mf-ink);
 }
 
 .section-title {
@@ -1401,31 +1571,59 @@ textarea:focus {
     flex-direction: row;
     align-items: center;
   }
+
+  .history-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .history-filters input {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 640px) {
   .site-nav {
-    height: auto;
+    height: 64px;
     padding: 12px 14px;
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
   }
 
   .nav-links {
-    width: 100%;
+    width: auto;
   }
 
   .nav-link {
-    flex: 1;
+    padding: 0 11px;
   }
 
   .audience-shell {
     width: min(100% - 24px, 1220px);
-    padding-top: 28px;
+    padding-top: 20px;
   }
 
   .hero-copy h1 {
-    font-size: clamp(2.35rem, 14vw, 3.7rem);
+    font-size: 2rem;
+    line-height: 1.02;
+  }
+
+  .hero-copy p:not(.eyebrow) {
+    margin-top: 12px;
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .audience-hero {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .status-panel {
+    display: none;
+  }
+
+  .brand-copy span {
+    display: none;
   }
 
   .panel-head,
@@ -1443,6 +1641,15 @@ textarea:focus {
   .quality-card,
   .persona-list {
     grid-template-columns: 1fr;
+  }
+
+  .diagnostic-grid,
+  .history-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .history-filters input {
+    grid-column: auto;
   }
 
   .run-panel,

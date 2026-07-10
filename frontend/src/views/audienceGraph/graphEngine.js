@@ -144,8 +144,17 @@ export function createGraph(opts) {
 
     const ng = layers.node.selectAll('g').data(data.nodes, (n) => n.id).enter().append('g')
       .attr('class', (n) => 'mf-node mf-node-' + n.type)
+      .attr('role', 'button')
+      .attr('tabindex', 0)
+      .attr('aria-label', (n) => nodeAriaLabel(n))
       .style('cursor', 'pointer')
       .on('click', (ev, n) => { ev.stopPropagation(); if (opts.onSelect) opts.onSelect(n) })
+      .on('keydown', (ev, n) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return
+        ev.preventDefault()
+        ev.stopPropagation()
+        if (opts.onSelect) opts.onSelect(n)
+      })
       .on('mouseenter', (ev, n) => { if (opts.onHover) opts.onHover(n, ev) })
       .on('mousemove', (ev, n) => { if (opts.onHover) opts.onHover(n, ev) })
       .on('mouseleave', () => { if (opts.onHover) opts.onHover(null) })
@@ -330,6 +339,13 @@ export function createGraph(opts) {
   function trim(v, n) {
     const s = String(v || '').replace(/\s+/g, ' ').trim()
     return s.length <= n ? s : s.slice(0, n - 1).trim() + '…'
+  }
+
+  function nodeAriaLabel(node) {
+    if (node.type === 'cluster') {
+      return `Cluster ${node.label || node.title || node.id}, ${node.topic_count || 0} topics`
+    }
+    return `Topic ${node.title || node.label || node.id}, ${node.decision || 'no decision'}, reliability ${node.reliability_grade || 'unknown'}`
   }
 
   function tune(partial) {
