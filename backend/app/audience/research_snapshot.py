@@ -470,7 +470,7 @@ def _same_branch_edges(
 ) -> list[dict[str, Any]]:
     previous_by_id = {str(topic.get("id")): topic for topic in previous_topics}
     return [
-        edge
+        edge | {"cluster_match": True}
         for edge in similarity_edges
         if str(previous_by_id.get(str(edge.get("target_topic_id")), {}).get("branch") or "")
         == current_branch

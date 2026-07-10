@@ -12,6 +12,10 @@ from typing import Any, Protocol
 LEXICAL_THRESHOLD = 0.20
 SEMANTIC_THRESHOLD = 0.68
 SEMANTIC_ONLY_LEXICAL_FLOOR = 0.30
+CLUSTER_LEXICAL_THRESHOLD = 0.35
+CLUSTER_SEMANTIC_THRESHOLD = 0.80
+CLUSTER_SEMANTIC_LEXICAL_FLOOR = 0.20
+SIMILARITY_ALGORITHM_VERSION = 2
 MAX_SIMILARITY_EDGES = 5
 
 
@@ -65,6 +69,23 @@ STOPWORDS = {
     "że",
 }
 BROAD_CONCEPTS = {"concept_pm"}
+CLUSTER_BROAD_CONCEPTS = {"concept_ai", "concept_pm"}
+CLUSTER_BROAD_TOKENS = {
+    "agent",
+    "agents",
+    "ai",
+    "genai",
+    "llm",
+    "management",
+    "manager",
+    "pm",
+    "product",
+    "produkt",
+    "produktowiec",
+    "produktowa",
+    "produktowe",
+    "produktowy",
+}
 CONCEPT_LABELS = {
     "concept_ai": "AI/LLM",
     "concept_evals": "evals/ROI",
@@ -96,9 +117,17 @@ CONCEPT_PATTERNS = {
     "concept_evals": (
         " eval",
         " roi",
+        " quality",
+        " gate",
+        " reliability",
+        " niezawod",
         " metryk",
         " jakosc",
         " jakość",
+        " koszt bled",
+        " koszt błęd",
+        " blad ai",
+        " błąd ai",
         " koszt inference",
         " udowodni",
         " dziala",
@@ -157,11 +186,13 @@ def build_similarity_edges(
     semantic_threshold: float = SEMANTIC_THRESHOLD,
     limit: int = MAX_SIMILARITY_EDGES,
 ) -> list[dict[str, Any]]:
-    candidates = [
-        previous
-        for previous in previous_topics
-        if not _is_self_topic(topic, previous) and previous.get("id")
-    ]
+    candidates = _dedupe_previous_topics(
+        [
+            previous
+            for previous in previous_topics
+            if not _is_self_topic(topic, previous) and previous.get("id")
+        ]
+    )
     semantic_scores = _semantic_scores(topic, candidates, embedding_provider)
 
     edges: list[dict[str, Any]] = []
@@ -175,10 +206,20 @@ def build_similarity_edges(
             semantic_score,
             semantic_threshold,
         )
-        score = max(lexical_score, semantic_score or 0.0) if semantic_match else lexical_score
+        score = (
+            max(lexical_score, semantic_score or 0.0)
+            if semantic_match
+            else lexical_score
+        )
         if lexical_score < lexical_threshold and not semantic_match:
             continue
         method = _similarity_method(lexical_score, semantic_match, lexical_threshold)
+        cluster_match = _cluster_match_allowed(
+            topic,
+            previous,
+            lexical_score=lexical_score,
+            semantic_score=semantic_score,
+        )
         edges.append(
             {
                 "source_topic_id": topic["id"],
@@ -191,7 +232,11 @@ def build_similarity_edges(
                 "score": round(score, 3),
                 "method": method,
                 "lexical_score": round(lexical_score, 3),
-                "semantic_score": round(semantic_score, 3) if semantic_score is not None else None,
+                "semantic_score": round(semantic_score, 3)
+                if semantic_score is not None
+                else None,
+                "algorithm_version": SIMILARITY_ALGORITHM_VERSION,
+                "cluster_match": cluster_match,
                 "explanation": _edge_explanation(
                     topic,
                     previous,
@@ -204,16 +249,25 @@ def build_similarity_edges(
     return sorted(edges, key=lambda edge: edge["score"], reverse=True)[:limit]
 
 
-def assign_topic_cluster(topic: dict[str, Any], similarity_edges: list[dict[str, Any]]) -> dict[str, Any]:
-    if similarity_edges:
-        best = similarity_edges[0]
-        cluster_id = best.get("target_cluster_id") or _cluster_id(best["target_topic_id"])
-        cluster_label = best.get("target_cluster_label") or best.get("target_title") or topic["title"]
+def assign_topic_cluster(
+    topic: dict[str, Any], similarity_edges: list[dict[str, Any]]
+) -> dict[str, Any]:
+    best = next((edge for edge in similarity_edges if edge.get("cluster_match")), None)
+    if best:
+        cluster_id = best.get("target_cluster_id") or _cluster_id(
+            best["target_topic_id"]
+        )
+        cluster_label = (
+            best.get("target_cluster_label")
+            or best.get("target_title")
+            or topic["title"]
+        )
     else:
         cluster_id = _cluster_id(topic["id"])
         cluster_label = topic["title"]
     topic["cluster_id"] = cluster_id
     topic["cluster_label"] = cluster_label
+    topic["cluster_version"] = SIMILARITY_ALGORITHM_VERSION
     return topic
 
 
@@ -224,9 +278,7 @@ def build_persona_memory(
 ) -> list[dict[str, Any]]:
     related_ids = {edge["target_topic_id"] for edge in similarity_edges}
     related_topics = [
-        previous
-        for previous in previous_topics
-        if previous.get("id") in related_ids
+        previous for previous in previous_topics if previous.get("id") in related_ids
     ]
 
     memory = []
@@ -270,7 +322,10 @@ def _semantic_scores(
 ) -> list[float] | None:
     if not embedding_provider or not previous_topics:
         return None
-    texts = [topic_similarity_text(topic), *[topic_similarity_text(previous) for previous in previous_topics]]
+    texts = [
+        topic_similarity_text(topic),
+        *[topic_similarity_text(previous) for previous in previous_topics],
+    ]
     try:
         embeddings = embedding_provider.embed_batch(texts)
     except Exception:  # noqa: BLE001
@@ -286,9 +341,16 @@ def _lexical_score(current: dict[str, Any], previous: dict[str, Any]) -> float:
     previous_terms = _weighted_terms(previous)
     if not current_terms or not previous_terms:
         return 0.0
-    intersection = sum(min(current_terms.get(term, 0), previous_terms.get(term, 0)) for term in current_terms)
-    denominator = max(sum(current_terms.values()), 1)
-    return intersection / denominator
+    all_terms = current_terms.keys() | previous_terms.keys()
+    intersection = sum(
+        min(current_terms.get(term, 0), previous_terms.get(term, 0))
+        for term in all_terms
+    )
+    union = sum(
+        max(current_terms.get(term, 0), previous_terms.get(term, 0))
+        for term in all_terms
+    )
+    return intersection / max(union, 1)
 
 
 def _weighted_terms(topic: dict[str, Any]) -> dict[str, int]:
@@ -378,7 +440,61 @@ def _semantic_match_allowed(
 
 
 def _specific_concept_tokens(text: str) -> list[str]:
-    return [concept for concept in _concept_tokens(text) if concept not in BROAD_CONCEPTS]
+    return [
+        concept for concept in _concept_tokens(text) if concept not in BROAD_CONCEPTS
+    ]
+
+
+def _cluster_match_allowed(
+    current: dict[str, Any],
+    previous: dict[str, Any],
+    *,
+    lexical_score: float,
+    semantic_score: float | None,
+) -> bool:
+    if lexical_score >= CLUSTER_LEXICAL_THRESHOLD:
+        return _has_specific_lexical_overlap(current, previous)
+    if (
+        semantic_score is None
+        or semantic_score < CLUSTER_SEMANTIC_THRESHOLD
+        or lexical_score < CLUSTER_SEMANTIC_LEXICAL_FLOOR
+    ):
+        return False
+    current_concepts = set(_cluster_concept_tokens(topic_similarity_text(current)))
+    previous_concepts = set(_cluster_concept_tokens(topic_similarity_text(previous)))
+    return bool(current_concepts & previous_concepts)
+
+
+def _has_specific_lexical_overlap(
+    current: dict[str, Any], previous: dict[str, Any]
+) -> bool:
+    current_tokens = set(
+        _tokens(f"{current.get('title', '')} {current.get('summary', '')}")
+    )
+    previous_tokens = set(
+        _tokens(f"{previous.get('title', '')} {previous.get('summary', '')}")
+    )
+    return bool((current_tokens & previous_tokens) - CLUSTER_BROAD_TOKENS)
+
+
+def _cluster_concept_tokens(text: str) -> list[str]:
+    return [
+        concept
+        for concept in _concept_tokens(text)
+        if concept not in CLUSTER_BROAD_CONCEPTS
+    ]
+
+
+def _dedupe_previous_topics(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for topic in topics:
+        topic_id = str(topic.get("id") or "")
+        if not topic_id or topic_id in seen:
+            continue
+        seen.add(topic_id)
+        deduped.append(topic)
+    return deduped
 
 
 def _edge_explanation(
@@ -419,7 +535,9 @@ def _cluster_id(seed: str) -> str:
     return f"cluster-{digest[:16]}"
 
 
-def _find_by_persona(items: list[dict[str, Any]], persona_id: str) -> dict[str, Any] | None:
+def _find_by_persona(
+    items: list[dict[str, Any]], persona_id: str
+) -> dict[str, Any] | None:
     for item in items:
         if item.get("persona_id") == persona_id:
             return item
