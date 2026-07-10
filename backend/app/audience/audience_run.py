@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from .channel_fit import build_channel_scores, top_channel
+from .channel_fit import (
+    CHANNELS as FIT_CHANNELS,
+    build_channel_scores,
+    channel_scores_source,
+    top_channel,
+)
 from .model_router import ModelRouter
 from .personas import AudiencePersona, load_default_personas
 from .similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
@@ -111,6 +116,7 @@ def build_fake_audience_run(
                 "persona_id": persona.id,
                 "stance": stance,
                 "channel_fit": _channel_fit(persona, run_input.channel),
+                "channel_scores": _fake_persona_channel_scores(persona),
                 "model": assignment.model,
                 "summary": _reaction_summary(persona, run_input),
             }
@@ -125,6 +131,9 @@ def build_fake_audience_run(
         )
 
     insights.extend(_insights_for(run_input, active_personas))
+    objections.sort(key=lambda objection: 0 if objection["severity"] == "high" else 1)
+    if objections:
+        objections[0]["drives_next_action"] = True
     channel_scores = build_channel_scores(
         topic_text=run_input.topic,
         title=run_input.display_title,
@@ -137,6 +146,9 @@ def build_fake_audience_run(
         "decision": _recommendation_for(run_input, active_personas),
         "best_channel": top_channel(channel_scores),
         "channel_scores": channel_scores,
+        "channel_scores_source": channel_scores_source(reactions),
+        "requested_channel": run_input.channel,
+        "primary_objection_id": objections[0]["id"] if objections else None,
         "next_action": _next_action_for(run_input),
         "rationale": (
             "Fake deterministic run: use this contract to validate graph/UI flow "
@@ -184,6 +196,16 @@ def _channel_fit(persona: AudiencePersona, channel: str) -> str:
     if channel in persona.channel_preferences:
         return "strong"
     return "weak"
+
+
+def _fake_persona_channel_scores(persona: AudiencePersona) -> dict[str, int]:
+    preferences = list(persona.channel_preferences)
+    return {
+        channel: max(20, 82 - preferences.index(channel) * 12)
+        if channel in preferences
+        else 38
+        for channel in FIT_CHANNELS
+    }
 
 
 def _reaction_summary(persona: AudiencePersona, run_input: AudienceRunInput) -> str:

@@ -379,6 +379,7 @@ def _recommendation(
         "decision": decision,
         "best_channel": best_channel,
         "channel_scores": channel_scores,
+        "channel_scores_source": "legacy_heuristic",
         "next_action": _next_action(
             decision=decision,
             title=str(candidate.get("title") or "topic"),

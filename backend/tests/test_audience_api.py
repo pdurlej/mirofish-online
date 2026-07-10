@@ -50,6 +50,8 @@ def test_fake_audience_run_returns_report_shape():
     assert data["recommendation"]["best_channel"] == "linkedin"
     assert data["recommendation"]["channel_scores"][0]["channel"] == "linkedin"
     assert data["recommendation"]["channel_scores"][0]["score"] >= 60
+    assert data["recommendation"]["channel_scores_source"] == "persona_aggregate"
+    assert len(data["reactions"][0]["channel_scores"]) == 5
     assert len(data["reactions"]) == 20
     assert data["write_counts"]["reactions"] == 20
 
@@ -92,6 +94,7 @@ def test_second_fake_run_can_report_similarity_edge():
     assert history[0]["similar_topics"][0]["title"]
     assert history[0]["cluster_label"]
     assert history[0]["channel_scores"]
+    assert history[0]["channel_scores_source"] == "persona_aggregate"
 
 
 def test_audience_graph_endpoint_returns_sanitized_topic_cluster_snapshot(monkeypatch):

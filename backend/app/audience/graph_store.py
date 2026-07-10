@@ -890,6 +890,9 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "decision_confidence": recommendation.get("decision_confidence"),
         "best_channel": recommendation.get("best_channel"),
         "channel_scores": recommendation.get("channel_scores", []),
+        "channel_scores_source": recommendation.get(
+            "channel_scores_source", "legacy_heuristic"
+        ),
         "next_action": recommendation.get("next_action"),
         "reaction_count": len(payload.get("reactions", [])),
         "similarity_count": len(similarity_edges),
@@ -901,6 +904,8 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_warnings": receipt.get("quality_warnings", []),
         "duplicate_objection_count": receipt.get("duplicate_objection_count", 0),
         "max_duplicate_objections": receipt.get("max_duplicate_objections", 0),
+        "near_duplicate_objections": receipt.get("near_duplicate_objections", 0),
+        "weak_topic_grounding": receipt.get("weak_topic_grounding", 0),
     }
 
 
