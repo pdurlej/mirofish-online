@@ -46,12 +46,15 @@ class InMemoryAudienceGraphStore:
         return _enrich_payload_for_read(payload) if payload else None
 
     def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
-        values = list(self._runs.values())[-limit:]
+        values = _latest_unique_payloads(self._runs.values(), limit)
         return [_previous_topic_payload(payload) for payload in values]
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         values = list(self._runs.values())[-limit:]
-        return [_history_summary(_enrich_payload_for_read(payload)) for payload in reversed(values)]
+        return [
+            _history_summary(_enrich_payload_for_read(payload))
+            for payload in reversed(values)
+        ]
 
     def graph_snapshot(
         self,
@@ -60,9 +63,9 @@ class InMemoryAudienceGraphStore:
         min_score: float = 0.35,
         include_personas: bool = False,
     ) -> dict[str, Any]:
-        values = list(self._runs.values())[-limit:]
+        values = _latest_unique_payloads(self._runs.values(), limit)
         return _graph_snapshot_from_payloads(
-            list(reversed(values)),
+            values,
             min_score=min_score,
             include_personas=include_personas,
         )
@@ -96,8 +99,7 @@ class Neo4jAudienceGraphStore:
                     t.channel = $channel,
                     t.topic_hash = $topic_hash,
                     t.summary = $summary,
-                    t.cluster_id = $cluster_id,
-                    t.cluster_label = $cluster_label,
+                    t.cluster_version = $cluster_version,
                     t.updated_at = $created_at
                 MERGE (r)-[:TESTED_TOPIC]->(t)
                 """,
@@ -117,41 +119,48 @@ class Neo4jAudienceGraphStore:
                 channel=payload["topic"]["channel"],
                 topic_hash=payload["topic"]["topic_hash"],
                 summary=payload["topic"]["summary"],
-                cluster_id=payload["topic"].get("cluster_id"),
-                cluster_label=payload["topic"].get("cluster_label"),
+                cluster_version=payload["topic"].get("cluster_version", 1),
             )
             cluster_id = payload["topic"].get("cluster_id")
             cluster_label = payload["topic"].get("cluster_label")
+            cluster_version = int(payload["topic"].get("cluster_version") or 1)
             if cluster_id and cluster_label:
-                tx.run(
-                    """
-                    MATCH (t:AudienceTopic {topic_id: $topic_id})
-                    MERGE (c:AudienceTopicCluster {cluster_id: $cluster_id})
-                    ON CREATE SET c.label = $cluster_label,
-                                  c.created_at = $created_at
-                    SET c.updated_at = $created_at,
-                        c.label = coalesce(c.label, $cluster_label)
-                    MERGE (t)-[:IN_CLUSTER]->(c)
-                    """,
-                    topic_id=payload["topic"]["id"],
-                    cluster_id=cluster_id,
-                    cluster_label=cluster_label,
-                    created_at=payload["created_at"],
-                )
-                if payload["similarity_edges"]:
-                    best_edge = payload["similarity_edges"][0]
+                if cluster_version >= 2:
                     tx.run(
                         """
-                        MATCH (tgt:AudienceTopic {topic_id: $target_topic_id})
-                        MATCH (c:AudienceTopicCluster {cluster_id: $cluster_id})
-                        WHERE tgt.cluster_id IS NULL
-                        SET tgt.cluster_id = $cluster_id,
-                            tgt.cluster_label = $cluster_label
-                        MERGE (tgt)-[:IN_CLUSTER]->(c)
+                        MATCH (t:AudienceTopic {topic_id: $topic_id})
+                        SET t.cluster_v2_id = $cluster_id,
+                            t.cluster_v2_label = $cluster_label,
+                            t.cluster_version = 2
+                        MERGE (c:AudienceTopicCluster {cluster_id: $cluster_id})
+                        ON CREATE SET c.created_at = $created_at
+                        SET c.updated_at = $created_at,
+                            c.label = $cluster_label,
+                            c.algorithm_version = 2
+                        MERGE (t)-[:IN_CLUSTER_V2]->(c)
                         """,
-                        target_topic_id=best_edge["target_topic_id"],
+                        topic_id=payload["topic"]["id"],
                         cluster_id=cluster_id,
                         cluster_label=cluster_label,
+                        created_at=payload["created_at"],
+                    )
+                else:
+                    tx.run(
+                        """
+                        MATCH (t:AudienceTopic {topic_id: $topic_id})
+                        SET t.cluster_id = $cluster_id,
+                            t.cluster_label = $cluster_label
+                        MERGE (c:AudienceTopicCluster {cluster_id: $cluster_id})
+                        ON CREATE SET c.label = $cluster_label,
+                                      c.created_at = $created_at
+                        SET c.updated_at = $created_at,
+                            c.label = coalesce(c.label, $cluster_label)
+                        MERGE (t)-[:IN_CLUSTER]->(c)
+                        """,
+                        topic_id=payload["topic"]["id"],
+                        cluster_id=cluster_id,
+                        cluster_label=cluster_label,
+                        created_at=payload["created_at"],
                     )
             for persona in payload["personas"]:
                 tx.run(
@@ -241,17 +250,24 @@ class Neo4jAudienceGraphStore:
                 rationale=payload["recommendation"]["rationale"],
             )
             for edge in payload["similarity_edges"]:
+                relationship_type = (
+                    "SIMILAR_TO_V2"
+                    if int(edge.get("algorithm_version") or 1) >= 2
+                    else "SIMILAR_TO"
+                )
+                query = f"""
+                MATCH (src:AudienceTopic {{topic_id: $source_topic_id}})
+                MATCH (tgt:AudienceTopic {{topic_id: $target_topic_id}})
+                MERGE (src)-[rel:{relationship_type}]->(tgt)
+                SET rel.score = $score,
+                    rel.method = $method,
+                    rel.lexical_score = $lexical_score,
+                    rel.semantic_score = $semantic_score,
+                    rel.explanation = $explanation,
+                    rel.algorithm_version = $algorithm_version
+                """
                 tx.run(
-                    """
-                    MATCH (src:AudienceTopic {topic_id: $source_topic_id})
-                    MATCH (tgt:AudienceTopic {topic_id: $target_topic_id})
-                    MERGE (src)-[rel:SIMILAR_TO]->(tgt)
-                    SET rel.score = $score,
-                        rel.method = $method,
-                        rel.lexical_score = $lexical_score,
-                        rel.semantic_score = $semantic_score,
-                        rel.explanation = $explanation
-                    """,
+                    query,
                     source_topic_id=edge["source_topic_id"],
                     target_topic_id=edge["target_topic_id"],
                     score=edge["score"],
@@ -259,6 +275,7 @@ class Neo4jAudienceGraphStore:
                     lexical_score=edge.get("lexical_score"),
                     semantic_score=edge.get("semantic_score"),
                     explanation=edge.get("explanation"),
+                    algorithm_version=edge.get("algorithm_version", 1),
                 )
 
         with self._storage._driver.session() as session:  # noqa: SLF001
@@ -271,13 +288,42 @@ class Neo4jAudienceGraphStore:
             result = tx.run(
                 """
                 MATCH (r:AudienceRun {run_id: $run_id})
-                RETURN r.payload_json AS payload_json
+                OPTIONAL MATCH (r)-[:TESTED_TOPIC]->(t:AudienceTopic)
+                OPTIONAL MATCH (t)-[sim_v2:SIMILAR_TO_V2]->(target_v2:AudienceTopic)
+                RETURN r.payload_json AS payload_json,
+                       coalesce(t.cluster_v2_id, t.cluster_id) AS cluster_id,
+                       coalesce(t.cluster_v2_label, t.cluster_label) AS cluster_label,
+                       coalesce(t.cluster_version, 1) AS cluster_version,
+                       collect(DISTINCT {
+                           source_topic_id: t.topic_id,
+                           target_topic_id: target_v2.topic_id,
+                           target_title: target_v2.title,
+                           target_channel: target_v2.channel,
+                           target_cluster_id: coalesce(target_v2.cluster_v2_id, target_v2.cluster_id),
+                           target_cluster_label: coalesce(target_v2.cluster_v2_label, target_v2.cluster_label),
+                           score: sim_v2.score,
+                           method: sim_v2.method,
+                           lexical_score: sim_v2.lexical_score,
+                           semantic_score: sim_v2.semantic_score,
+                           explanation: sim_v2.explanation,
+                           algorithm_version: 2
+                       }) AS similarity_edges_v2
                 """,
                 run_id=run_id,
             )
             record = result.single()
             if record and record["payload_json"]:
-                return _enrich_payload_for_read(json.loads(record["payload_json"]))
+                record_data = dict(record)
+                payload = _enrich_payload_for_read(json.loads(record["payload_json"]))
+                _overlay_cluster_from_record(payload, record_data)
+                if int(record_data.get("cluster_version") or 1) >= 2:
+                    payload["similarity_edges"] = _preferred_similarity_edges(
+                        list(record_data.get("similarity_edges_v2") or []),
+                        v2_source_ids={
+                            str((payload.get("topic") or {}).get("id") or "")
+                        },
+                    )
+                return payload
 
             result = tx.run(
                 """
@@ -311,15 +357,19 @@ class Neo4jAudienceGraphStore:
                 """
                 MATCH (t:AudienceTopic)
                 OPTIONAL MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t)
-                RETURN r.payload_json AS payload_json,
-                       r.created_at AS created_at,
+                WITH t, r
+                ORDER BY r.created_at DESC
+                WITH t, head(collect(r)) AS latest_run
+                RETURN latest_run.payload_json AS payload_json,
+                       latest_run.created_at AS created_at,
                        t.topic_id AS id,
                        t.topic_hash AS topic_hash,
                        t.summary AS summary,
                        t.title AS title,
                        t.channel AS channel,
-                       t.cluster_id AS cluster_id,
-                       t.cluster_label AS cluster_label
+                       coalesce(t.cluster_v2_id, t.cluster_id) AS cluster_id,
+                       coalesce(t.cluster_v2_label, t.cluster_label) AS cluster_label,
+                       coalesce(t.cluster_version, 1) AS cluster_version
                 ORDER BY t.updated_at DESC
                 LIMIT $limit
                 """,
@@ -337,7 +387,8 @@ class Neo4jAudienceGraphStore:
                 MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t:AudienceTopic)
                 OPTIONAL MATCH (r)-[:HAS_RECOMMENDATION]->(rec:AudienceRecommendation)
                 OPTIONAL MATCH (r)-[:HAS_REACTION]->(reaction:AudienceReaction)
-                OPTIONAL MATCH (t)-[sim:SIMILAR_TO]->(target:AudienceTopic)
+                OPTIONAL MATCH (t)-[sim_v2:SIMILAR_TO_V2]->(target_v2:AudienceTopic)
+                OPTIONAL MATCH (t)-[sim_v1:SIMILAR_TO]->(target_v1:AudienceTopic)
                 RETURN r.run_id AS run_id,
                        r.created_at AS created_at,
                        r.mode AS mode,
@@ -347,18 +398,28 @@ class Neo4jAudienceGraphStore:
                        r.payload_json AS payload_json,
                        t.title AS title,
                        t.channel AS channel,
-                       t.cluster_label AS cluster_label,
+                       coalesce(t.cluster_v2_label, t.cluster_label) AS cluster_label,
+                       coalesce(t.cluster_version, 1) AS cluster_version,
                        rec.decision AS decision,
                        rec.best_channel AS best_channel,
                        rec.next_action AS next_action,
                        count(DISTINCT reaction) AS reaction_count,
-                       count(DISTINCT sim) AS similarity_count,
                        collect(DISTINCT {
-                           title: target.title,
-                           score: sim.score,
-                           method: sim.method,
-                           explanation: sim.explanation
-                       }) AS similar_topics
+                           target_topic_id: target_v2.topic_id,
+                           title: target_v2.title,
+                           score: sim_v2.score,
+                           method: sim_v2.method,
+                           explanation: sim_v2.explanation,
+                           algorithm_version: 2
+                       }) AS similar_topics_v2,
+                       collect(DISTINCT {
+                           target_topic_id: target_v1.topic_id,
+                           title: target_v1.title,
+                           score: sim_v1.score,
+                           method: sim_v1.method,
+                           explanation: sim_v1.explanation,
+                           algorithm_version: 1
+                       }) AS similar_topics_v1
                 ORDER BY r.created_at DESC
                 LIMIT $limit
                 """,
@@ -379,41 +440,64 @@ class Neo4jAudienceGraphStore:
         def _read(tx):
             result = tx.run(
                 """
-                MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t:AudienceTopic)
-                OPTIONAL MATCH (r)-[:HAS_RECOMMENDATION]->(rec:AudienceRecommendation)
-                OPTIONAL MATCH (t)-[:IN_CLUSTER]->(cluster:AudienceTopicCluster)
-                WITH r, t, rec, head(collect(cluster)) AS cluster
-                ORDER BY coalesce(t.updated_at, r.created_at) DESC
+                MATCH (t:AudienceTopic)
+                OPTIONAL MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t)
+                WITH t, r
+                ORDER BY r.created_at DESC
+                WITH t, head(collect(r)) AS latest_run
+                WHERE latest_run IS NOT NULL
+                OPTIONAL MATCH (latest_run)-[:HAS_RECOMMENDATION]->(rec:AudienceRecommendation)
+                OPTIONAL MATCH (t)-[:IN_CLUSTER_V2]->(cluster_v2:AudienceTopicCluster)
+                OPTIONAL MATCH (t)-[:IN_CLUSTER]->(cluster_v1:AudienceTopicCluster)
+                WITH latest_run, t, rec,
+                     head(collect(DISTINCT cluster_v2)) AS cluster_v2,
+                     head(collect(DISTINCT cluster_v1)) AS cluster_v1
+                ORDER BY coalesce(t.updated_at, latest_run.created_at) DESC
                 LIMIT $limit
                 WITH collect({
-                    run_id: r.run_id,
-                    created_at: r.created_at,
-                    total_tokens: r.total_tokens,
-                    failure_rate: r.failure_rate,
-                    reliability_grade: r.reliability_grade,
+                    run_id: latest_run.run_id,
+                    created_at: latest_run.created_at,
+                    total_tokens: latest_run.total_tokens,
+                    failure_rate: latest_run.failure_rate,
+                    reliability_grade: latest_run.reliability_grade,
                     topic_id: t.topic_id,
                     title: t.title,
                     channel: t.channel,
                     summary: t.summary,
-                    cluster_id: coalesce(t.cluster_id, cluster.cluster_id),
-                    cluster_label: coalesce(t.cluster_label, cluster.label),
+                    cluster_id: coalesce(t.cluster_v2_id, t.cluster_id, cluster_v2.cluster_id, cluster_v1.cluster_id),
+                    cluster_label: coalesce(t.cluster_v2_label, t.cluster_label, cluster_v2.label, cluster_v1.label),
+                    cluster_version: coalesce(t.cluster_version, 1),
                     decision: rec.decision,
                     best_channel: rec.best_channel,
                     next_action: rec.next_action
                 }) AS topic_rows
                 WITH topic_rows, [row IN topic_rows | row.topic_id] AS topic_ids
                 UNWIND topic_rows AS row
-                OPTIONAL MATCH (src:AudienceTopic {topic_id: row.topic_id})-[sim:SIMILAR_TO]->(target:AudienceTopic)
-                WHERE sim.score >= $min_score AND target.topic_id IN topic_ids
+                MATCH (src:AudienceTopic {topic_id: row.topic_id})
+                OPTIONAL MATCH (src)-[sim_v2:SIMILAR_TO_V2]->(target_v2:AudienceTopic)
+                WHERE sim_v2.score >= $min_score AND target_v2.topic_id IN topic_ids
+                OPTIONAL MATCH (src)-[sim_v1:SIMILAR_TO]->(target_v1:AudienceTopic)
+                WHERE sim_v1.score >= $min_score AND target_v1.topic_id IN topic_ids
                 WITH topic_rows, collect(DISTINCT {
                     source_topic_id: row.topic_id,
-                    target_topic_id: target.topic_id,
-                    target_title: target.title,
-                    score: sim.score,
-                    method: sim.method,
-                    lexical_score: sim.lexical_score,
-                    semantic_score: sim.semantic_score,
-                    explanation: sim.explanation
+                    target_topic_id: target_v2.topic_id,
+                    target_title: target_v2.title,
+                    score: sim_v2.score,
+                    method: sim_v2.method,
+                    lexical_score: sim_v2.lexical_score,
+                    semantic_score: sim_v2.semantic_score,
+                    explanation: sim_v2.explanation,
+                    algorithm_version: 2
+                }) + collect(DISTINCT {
+                    source_topic_id: row.topic_id,
+                    target_topic_id: target_v1.topic_id,
+                    target_title: target_v1.title,
+                    score: sim_v1.score,
+                    method: sim_v1.method,
+                    lexical_score: sim_v1.lexical_score,
+                    semantic_score: sim_v1.semantic_score,
+                    explanation: sim_v1.explanation,
+                    algorithm_version: 1
                 }) AS similarity_edges
                 RETURN topic_rows AS topic_rows,
                        [edge IN similarity_edges WHERE edge.target_topic_id IS NOT NULL] AS similarity_edges
@@ -423,7 +507,9 @@ class Neo4jAudienceGraphStore:
             )
             record = result.single()
             if not record:
-                return _graph_snapshot_from_rows([], [], include_personas=include_personas)
+                return _graph_snapshot_from_rows(
+                    [], [], include_personas=include_personas
+                )
             return _graph_snapshot_from_rows(
                 list(record["topic_rows"] or []),
                 list(record["similarity_edges"] or []),
@@ -436,6 +522,75 @@ class Neo4jAudienceGraphStore:
         snapshot["filters"]["min_score"] = min_score
         snapshot["filters"]["include_personas"] = include_personas
         return snapshot
+
+
+def _latest_unique_payloads(
+    payloads: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payload in reversed(list(payloads)):
+        topic_id = str((payload.get("topic") or {}).get("id") or "")
+        if not topic_id or topic_id in seen:
+            continue
+        seen.add(topic_id)
+        unique.append(payload)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+def _dedupe_topic_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        topic_id = str(row.get("topic_id") or "")
+        if not topic_id or topic_id in seen:
+            continue
+        seen.add(topic_id)
+        unique.append(row)
+    return unique
+
+
+def _preferred_similarity_edges(
+    edges: list[dict[str, Any]],
+    *,
+    v2_source_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    valid = [
+        edge
+        for edge in edges
+        if edge.get("source_topic_id") and edge.get("target_topic_id")
+    ]
+    v2_sources = set(v2_source_ids or set()) | {
+        str(edge["source_topic_id"])
+        for edge in valid
+        if int(edge.get("algorithm_version") or 1) >= 2
+    }
+    preferred = [
+        edge
+        for edge in valid
+        if str(edge["source_topic_id"]) not in v2_sources
+        or int(edge.get("algorithm_version") or 1) >= 2
+    ]
+    by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+    for edge in preferred:
+        pair = (str(edge["source_topic_id"]), str(edge["target_topic_id"]))
+        current = by_pair.get(pair)
+        if current is None or (
+            int(edge.get("algorithm_version") or 1),
+            _safe_float(edge.get("score")),
+        ) > (
+            int(current.get("algorithm_version") or 1),
+            _safe_float(current.get("score")),
+        ):
+            by_pair[pair] = edge
+    return sorted(
+        by_pair.values(),
+        key=lambda edge: _safe_float(edge.get("score")),
+        reverse=True,
+    )
 
 
 def _write_counts(payload: dict[str, Any]) -> dict[str, Any]:
@@ -479,6 +634,7 @@ def _graph_snapshot_from_payloads(
                 "channel": topic.get("channel"),
                 "cluster_id": topic.get("cluster_id"),
                 "cluster_label": topic.get("cluster_label"),
+                "cluster_version": topic.get("cluster_version", 1),
                 "decision": recommendation.get("decision"),
                 "best_channel": recommendation.get("best_channel"),
                 "next_action": recommendation.get("next_action"),
@@ -513,6 +669,16 @@ def _graph_snapshot_from_rows(
     *,
     include_personas: bool,
 ) -> dict[str, Any]:
+    topic_rows = _dedupe_topic_rows(topic_rows)
+    v2_source_ids = {
+        str(row.get("topic_id"))
+        for row in topic_rows
+        if int(row.get("cluster_version") or 1) >= 2 and row.get("topic_id")
+    }
+    similarity_edges = _preferred_similarity_edges(
+        similarity_edges,
+        v2_source_ids=v2_source_ids,
+    )
     topic_ids = {str(row.get("topic_id")) for row in topic_rows if row.get("topic_id")}
     nodes: dict[str, dict[str, Any]] = {}
     cluster_topic_counts: dict[str, int] = {}
@@ -523,12 +689,16 @@ def _graph_snapshot_from_rows(
         if not topic_id:
             continue
         cluster_id = str(row.get("cluster_id") or f"singleton-{topic_id}")
-        cluster_label = str(row.get("cluster_label") or row.get("title") or "Unclustered")
+        cluster_label = str(
+            row.get("cluster_label") or row.get("title") or "Unclustered"
+        )
         topic_node_id = _topic_graph_id(topic_id)
         cluster_node_id = _cluster_graph_id(cluster_id)
         channel = str(row.get("channel") or "unknown")
         channels.add(channel)
-        cluster_topic_counts[cluster_node_id] = cluster_topic_counts.get(cluster_node_id, 0) + 1
+        cluster_topic_counts[cluster_node_id] = (
+            cluster_topic_counts.get(cluster_node_id, 0) + 1
+        )
 
         nodes[topic_node_id] = {
             "id": topic_node_id,
@@ -540,6 +710,7 @@ def _graph_snapshot_from_rows(
             "channel": channel,
             "cluster_id": cluster_id,
             "cluster_label": cluster_label,
+            "cluster_version": int(row.get("cluster_version") or 1),
             "decision": row.get("decision"),
             "best_channel": row.get("best_channel"),
             "next_action": row.get("next_action"),
@@ -558,6 +729,7 @@ def _graph_snapshot_from_rows(
                 "label": cluster_label,
                 "title": cluster_label,
                 "topic_count": 0,
+                "algorithm_version": int(row.get("cluster_version") or 1),
             },
         )
 
@@ -594,6 +766,7 @@ def _graph_snapshot_from_rows(
             "method": edge.get("method") or "lexical",
             "lexical_score": _nullable_float(edge.get("lexical_score")),
             "semantic_score": _nullable_float(edge.get("semantic_score")),
+            "algorithm_version": int(edge.get("algorithm_version") or 1),
             "explanation": edge.get("explanation") or _fallback_edge_explanation(edge),
         }
         edges.append(graph_edge)
@@ -605,6 +778,7 @@ def _graph_snapshot_from_rows(
                     "title": target_node.get("title"),
                     "score": graph_edge["score"],
                     "method": graph_edge["method"],
+                    "algorithm_version": graph_edge["algorithm_version"],
                     "explanation": graph_edge["explanation"],
                 }
             )
@@ -626,9 +800,15 @@ def _graph_snapshot_from_rows(
         "nodes": node_values,
         "edges": edges,
         "stats": {
-            "topic_count": sum(1 for node in node_values if node.get("type") == "topic"),
-            "cluster_count": sum(1 for node in node_values if node.get("type") == "cluster"),
-            "similarity_edge_count": sum(1 for edge in edges if edge.get("type") == "SIMILAR_TO"),
+            "topic_count": sum(
+                1 for node in node_values if node.get("type") == "topic"
+            ),
+            "cluster_count": sum(
+                1 for node in node_values if node.get("type") == "cluster"
+            ),
+            "similarity_edge_count": sum(
+                1 for edge in edges if edge.get("type") == "SIMILAR_TO"
+            ),
             "edge_count": len(edges),
             "persona_overlay_included": include_personas,
         },
@@ -671,9 +851,25 @@ def _fallback_edge_explanation(edge: dict[str, Any]) -> str:
 
 def _enrich_payload_for_read(payload: dict[str, Any]) -> dict[str, Any]:
     payload = enrich_payload_channel_scores(payload)
-    for edge in payload.get("similarity_edges") or []:
-        edge["explanation"] = edge.get("explanation") or _fallback_edge_explanation(edge)
+    payload["similarity_edges"] = _preferred_similarity_edges(
+        payload.get("similarity_edges") or []
+    )
+    for edge in payload["similarity_edges"]:
+        edge["explanation"] = edge.get("explanation") or _fallback_edge_explanation(
+            edge
+        )
     return payload
+
+
+def _overlay_cluster_from_record(
+    payload: dict[str, Any], record: dict[str, Any]
+) -> None:
+    topic = payload.setdefault("topic", {})
+    topic["cluster_id"] = record.get("cluster_id") or topic.get("cluster_id")
+    topic["cluster_label"] = record.get("cluster_label") or topic.get("cluster_label")
+    topic["cluster_version"] = record.get("cluster_version") or topic.get(
+        "cluster_version", 1
+    )
 
 
 def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -681,7 +877,7 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
     receipt = payload.get("receipt", {})
     recommendation = payload.get("recommendation", {})
     topic = payload.get("topic", {})
-    similarity_edges = payload.get("similarity_edges", [])
+    similarity_edges = _preferred_similarity_edges(payload.get("similarity_edges", []))
     return {
         "run_id": payload.get("run_id"),
         "created_at": payload.get("created_at"),
@@ -689,6 +885,7 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "title": topic.get("title"),
         "channel": topic.get("channel"),
         "cluster_label": topic.get("cluster_label"),
+        "cluster_version": topic.get("cluster_version", 1),
         "decision": recommendation.get("decision"),
         "decision_confidence": recommendation.get("decision_confidence"),
         "best_channel": recommendation.get("best_channel"),
@@ -719,7 +916,15 @@ def _previous_topic_from_record(record: dict[str, Any]) -> dict[str, Any]:
     payload_json = record.get("payload_json")
     if payload_json:
         try:
-            return _previous_topic_payload(json.loads(payload_json))
+            topic = _previous_topic_payload(json.loads(payload_json))
+            topic["cluster_id"] = record.get("cluster_id") or topic.get("cluster_id")
+            topic["cluster_label"] = record.get("cluster_label") or topic.get(
+                "cluster_label"
+            )
+            topic["cluster_version"] = record.get("cluster_version") or topic.get(
+                "cluster_version", 1
+            )
+            return topic
         except json.JSONDecodeError:
             pass
     return {
@@ -730,6 +935,7 @@ def _previous_topic_from_record(record: dict[str, Any]) -> dict[str, Any]:
         "channel": record.get("channel"),
         "cluster_id": record.get("cluster_id"),
         "cluster_label": record.get("cluster_label"),
+        "cluster_version": record.get("cluster_version", 1),
         "created_at": record.get("created_at"),
         "reactions": [],
         "objections": [],
@@ -737,30 +943,90 @@ def _previous_topic_from_record(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    topics = [
-        {
-            "title": edge.get("target_title") or edge.get("target_topic_id"),
-            "score": edge.get("score"),
-            "method": edge.get("method", "lexical"),
-            "explanation": edge.get("explanation") or _fallback_edge_explanation(edge),
-        }
-        for edge in edges
-        if edge.get("target_title") or edge.get("target_topic_id")
+    topics = []
+    for edge in _preferred_similarity_edges(edges):
+        if not (edge.get("target_title") or edge.get("target_topic_id")):
+            continue
+        topics.append(
+            {
+                "target_topic_id": edge.get("target_topic_id"),
+                "title": edge.get("target_title") or edge.get("target_topic_id"),
+                "score": edge.get("score"),
+                "method": edge.get("method", "lexical"),
+                "algorithm_version": int(edge.get("algorithm_version") or 1),
+                "explanation": edge.get("explanation")
+                or _fallback_edge_explanation(edge),
+            }
+        )
+    return _unique_similar_topics_by_title(topics)[:5]
+
+
+def _record_similar_topics(record: dict[str, Any]) -> list[dict[str, Any]]:
+    v2 = [topic for topic in record.get("similar_topics_v2", []) if topic.get("title")]
+    legacy = [
+        topic for topic in record.get("similar_topics_v1", []) if topic.get("title")
     ]
-    return topics[:5]
+    if int(record.get("cluster_version") or 1) >= 2:
+        topics = v2
+    else:
+        topics = (
+            v2
+            or legacy
+            or [
+                topic
+                for topic in record.get("similar_topics", [])
+                if topic.get("title")
+            ]
+        )
+    return _unique_similar_topics_by_title(topics)
+
+
+def _unique_similar_topics_by_title(
+    topics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for topic in topics:
+        title = str(topic.get("title") or topic.get("target_topic_id") or "").strip()
+        if not title:
+            continue
+        key = title.casefold()
+        candidate = topic | {
+            "title": title,
+            "explanation": topic.get("explanation")
+            or _fallback_edge_explanation(topic),
+        }
+        current = deduped.get(key)
+        if current is None or _safe_float(candidate.get("score")) > _safe_float(
+            current.get("score")
+        ):
+            deduped[key] = candidate
+    return sorted(
+        deduped.values(),
+        key=lambda topic: _safe_float(topic.get("score")),
+        reverse=True,
+    )
 
 
 def _neo4j_history_summary(record: dict[str, Any]) -> dict[str, Any]:
+    similar_topics = _record_similar_topics(record)
     if record.get("payload_json"):
-        return _history_summary(_enrich_payload_for_read(json.loads(record["payload_json"])))
+        summary = _history_summary(
+            _enrich_payload_for_read(json.loads(record["payload_json"]))
+        )
+        summary["cluster_label"] = record.get("cluster_label") or summary.get(
+            "cluster_label"
+        )
+        summary["cluster_version"] = record.get("cluster_version") or summary.get(
+            "cluster_version", 1
+        )
+        if similar_topics:
+            summary["similar_topics"] = similar_topics[:5]
+            summary["similarity_count"] = len(similar_topics)
+        return summary
 
-    similar_topics = [
-        topic | {"explanation": topic.get("explanation") or _fallback_edge_explanation(topic)}
-        for topic in record.get("similar_topics", [])
-        if topic.get("title")
-    ]
     similar_topics.sort(key=lambda topic: topic.get("score") or 0, reverse=True)
     record["similar_topics"] = similar_topics[:5]
+    record["similarity_count"] = len(similar_topics)
     record["channel_scores"] = build_channel_scores(
         topic_text=str(record.get("title") or ""),
         title=record.get("title"),

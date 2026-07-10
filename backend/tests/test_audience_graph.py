@@ -25,9 +25,14 @@ from app.audience.live_runner import (
     _reasoning_effort_for_model,
 )
 from app.audience.channel_fit import build_channel_scores, top_channel
-from app.audience.graph_store import _neo4j_history_summary
+from app.audience.graph_store import _graph_snapshot_from_rows, _neo4j_history_summary
+from app.audience.reclustering import build_recluster_plan, summarize_recluster_plan
 from app.audience.research_snapshot import SyntheticResearchDataset, build_snapshot_run
-from app.audience.similarity import assign_topic_cluster, build_persona_memory, build_similarity_edges
+from app.audience.similarity import (
+    assign_topic_cluster,
+    build_persona_memory,
+    build_similarity_edges,
+)
 from app.storage.embedding_service import EmbeddingError
 from app.utils.llm_client import LLMChatResult
 
@@ -109,6 +114,51 @@ def test_neo4j_history_summary_uses_stored_channel_scores_payload():
     assert summary["channel_scores"][0]["score"] == 75
 
 
+def test_neo4j_history_summary_prefers_unique_v2_similarity_topics():
+    payload = build_fake_audience_run(
+        AudienceRunInput(topic="AI eval quality gates", run_seed="history-v2")
+    ).to_dict()
+    payload["similarity_edges"] = [
+        {
+            "source_topic_id": payload["topic"]["id"],
+            "target_topic_id": "legacy-target",
+            "target_title": "Legacy target",
+            "score": 0.95,
+            "algorithm_version": 1,
+        }
+    ]
+    record = {
+        "payload_json": json.dumps(payload),
+        "cluster_label": "AI eval quality gates",
+        "cluster_version": 2,
+        "similar_topics_v2": [
+            {
+                "target_topic_id": "v2-target",
+                "title": "Reliable AI evals",
+                "score": 0.81,
+                "method": "hybrid",
+                "algorithm_version": 2,
+            },
+            {
+                "target_topic_id": "duplicate-title-target",
+                "title": "Reliable AI evals",
+                "score": 0.79,
+                "method": "hybrid",
+                "algorithm_version": 2,
+            },
+        ],
+        "similar_topics_v1": [],
+    }
+
+    summary = _neo4j_history_summary(record)
+
+    assert summary["cluster_version"] == 2
+    assert summary["similarity_count"] == 1
+    assert [topic["title"] for topic in summary["similar_topics"]] == [
+        "Reliable AI evals"
+    ]
+
+
 def test_deepseek_flash_uses_low_reasoning_effort():
     assert _reasoning_effort_for_model("deepseek-v4-flash") == "low"
     assert _reasoning_effort_for_model("deepseek-v4-pro") == "medium"
@@ -136,8 +186,13 @@ def test_fake_audience_run_has_20_reactions_and_next_action():
     }
     assert result.recommendation["best_channel"]
     assert len(result.recommendation["channel_scores"]) == 5
-    assert result.recommendation["channel_scores"][0]["score"] >= result.recommendation["channel_scores"][-1]["score"]
-    assert result.recommendation["best_channel"] == top_channel(result.recommendation["channel_scores"])
+    assert (
+        result.recommendation["channel_scores"][0]["score"]
+        >= result.recommendation["channel_scores"][-1]["score"]
+    )
+    assert result.recommendation["best_channel"] == top_channel(
+        result.recommendation["channel_scores"]
+    )
     assert result.recommendation["next_action"]
     assert all("model_assignment" in persona for persona in result.personas)
 
@@ -163,7 +218,9 @@ def test_synthetic_research_snapshot_builds_standard_run_contract():
     }
     assert len(result.recommendation["channel_scores"]) == 5
     assert all("model_assignment" in persona for persona in result.personas)
-    assert all(reaction["model"] == "agy:gemini-3.5-flash-low" for reaction in result.reactions)
+    assert all(
+        reaction["model"] == "agy:gemini-3.5-flash-low" for reaction in result.reactions
+    )
 
 
 def test_synthetic_research_snapshot_reuses_similarity_and_memory():
@@ -243,7 +300,6 @@ def test_synthetic_research_snapshot_keeps_cross_branch_similarity_out_of_cluste
         previous_topics=store.previous_topics(),
     )
 
-    assert control.similarity_edges
     assert control.topic["cluster_label"] == "Dobre pytania PM-a"
 
 
@@ -399,8 +455,13 @@ def test_in_memory_graph_detects_previous_topic_similarity():
     legacy_payload["similarity_edges"][0].pop("explanation", None)
     store._runs[second.run_id] = legacy_payload  # noqa: SLF001
 
-    assert store.read_run(second.run_id)["topic"]["topic_hash"] == second.topic["topic_hash"]
-    assert store.read_run(second.run_id)["similarity_edges"][0]["explanation"].startswith("Connected by")
+    assert (
+        store.read_run(second.run_id)["topic"]["topic_hash"]
+        == second.topic["topic_hash"]
+    )
+    assert store.read_run(second.run_id)["similarity_edges"][0][
+        "explanation"
+    ].startswith("Connected by")
     legacy_payload["similarity_edges"][0].pop("explanation", None)
     history = store.list_runs()
     assert history[0]["run_id"] == second.run_id
@@ -451,9 +512,18 @@ class SemanticEmbeddingProvider:
         normalized = text.lower()
         if "pricing" in normalized or "saas" in normalized or "packaging" in normalized:
             return [0.0, 1.0, 0.0]
-        if "eudi" in normalized or "mobywatel" in normalized or "onboarding" in normalized:
+        if (
+            "eudi" in normalized
+            or "mobywatel" in normalized
+            or "onboarding" in normalized
+        ):
             return [0.0, 0.0, 1.0]
-        if "ai" in normalized or "evals" in normalized or "roi" in normalized or "agent" in normalized:
+        if (
+            "ai" in normalized
+            or "evals" in normalized
+            or "roi" in normalized
+            or "agent" in normalized
+        ):
             return [1.0, 0.0, 0.0]
         return [0.0, 0.0, 0.0]
 
@@ -552,11 +622,55 @@ def test_control_topics_do_not_join_ai_cluster():
     ]
 
     for control in controls:
-        assert build_similarity_edges(
+        assert (
+            build_similarity_edges(
+                control,
+                [ai_previous],
+                embedding_provider=SemanticEmbeddingProvider(),
+            )
+            == []
+        )
+
+
+def test_broad_ai_pm_overlap_can_create_edge_without_joining_ai_cluster():
+    ai_previous = {
+        "id": "topic-ai-workflow",
+        "topic_hash": "ai-workflow",
+        "title": "AI-native PM workflow z agentami",
+        "summary": "Product manager używa AI i agentów do discovery oraz prototypów.",
+        "channel": "blog",
+        "cluster_id": "cluster-ai",
+        "cluster_label": "AI-native PM workflow",
+        "cluster_version": 2,
+    }
+    controls = [
+        {
+            "id": "topic-career",
+            "topic_hash": "career",
+            "title": "Kariera product managera w erze AI",
+            "summary": "Jak PM buduje pozycję na rynku pracy i planuje awans.",
+            "channel": "linkedin",
+        },
+        {
+            "id": "topic-leadership",
+            "topic_hash": "leadership",
+            "title": "Leadership produktowy w erze AI",
+            "summary": "Jak product manager rozwija wpływ, komunikację i zaufanie zespołu.",
+            "channel": "podcast",
+        },
+    ]
+
+    for control in controls:
+        edges = build_similarity_edges(
             control,
             [ai_previous],
-            embedding_provider=SemanticEmbeddingProvider(),
-        ) == []
+            embedding_provider=SameEmbeddingProvider(),
+        )
+        assign_topic_cluster(control, edges)
+
+        assert edges
+        assert all(not edge["cluster_match"] for edge in edges)
+        assert control["cluster_id"] != ai_previous["cluster_id"]
 
 
 def test_similarity_ignores_batch_boilerplate_and_broad_pm_overlap_for_controls():
@@ -617,8 +731,8 @@ def test_topic_cluster_starts_singleton_then_joins_existing_cluster():
     first = {
         "id": "topic-first",
         "topic_hash": "first",
-        "title": "AI-native PM workflow",
-        "summary": "Agentic AI workflow for product managers",
+        "title": "AI-native eval workflow",
+        "summary": "Agentic AI workflow with evals and ROI for product managers",
         "channel": "blog",
     }
     assign_topic_cluster(first, [])
@@ -640,6 +754,179 @@ def test_topic_cluster_starts_singleton_then_joins_existing_cluster():
     assert first["cluster_label"] == first["title"]
     assert second["cluster_id"] == first["cluster_id"]
     assert second["cluster_label"] == first["title"]
+    assert second["cluster_version"] == 2
+
+
+def test_similarity_deduplicates_repeated_previous_topic_ids():
+    current = {
+        "id": "topic-current",
+        "topic_hash": "current",
+        "title": "AI eval workflow for launches",
+        "summary": "AI eval workflow and quality gates for product launches",
+        "channel": "blog",
+    }
+    previous = {
+        "id": "topic-previous",
+        "topic_hash": "previous",
+        "title": "Quality gates for AI launches",
+        "summary": "AI quality gates and eval workflow for reliable product launches",
+        "channel": "podcast",
+    }
+
+    edges = build_similarity_edges(current, [previous, dict(previous)])
+
+    assert len(edges) == 1
+    assert edges[0]["target_topic_id"] == previous["id"]
+    assert edges[0]["algorithm_version"] == 2
+
+
+def test_in_memory_graph_uses_latest_run_for_each_unique_topic():
+    store = InMemoryAudienceGraphStore()
+    first = build_fake_audience_run(
+        AudienceRunInput(topic="AI eval workflow for PM teams", run_seed="first")
+    )
+    second = build_fake_audience_run(
+        AudienceRunInput(topic="AI eval workflow for PM teams", run_seed="second")
+    )
+    store.write_run(first)
+    store.write_run(second)
+
+    previous = store.previous_topics(limit=25)
+    graph = store.graph_snapshot(limit=25, min_score=0.0)
+    topic_nodes = [node for node in graph["nodes"] if node["type"] == "topic"]
+    cluster_nodes = [node for node in graph["nodes"] if node["type"] == "cluster"]
+
+    assert len(previous) == 1
+    assert len(topic_nodes) == 1
+    assert topic_nodes[0]["run_id"] == second.run_id
+    assert cluster_nodes[0]["topic_count"] == 1
+    assert graph["stats"]["topic_count"] == 1
+
+
+def test_graph_snapshot_deduplicates_rows_counts_and_prefers_v2_edges():
+    topic_rows = [
+        {
+            "topic_id": "source",
+            "run_id": "latest-run",
+            "title": "Source topic",
+            "cluster_id": "cluster-v2",
+            "cluster_label": "V2 cluster",
+            "cluster_version": 2,
+        },
+        {
+            "topic_id": "source",
+            "run_id": "older-run",
+            "title": "Source topic",
+            "cluster_id": "legacy-cluster",
+            "cluster_label": "Legacy cluster",
+            "cluster_version": 1,
+        },
+        {
+            "topic_id": "target",
+            "run_id": "target-run",
+            "title": "Target topic",
+            "cluster_id": "cluster-v2",
+            "cluster_label": "V2 cluster",
+            "cluster_version": 2,
+        },
+    ]
+    similarity_edges = [
+        {
+            "source_topic_id": "source",
+            "target_topic_id": "target",
+            "score": 0.95,
+            "method": "lexical",
+            "algorithm_version": 1,
+        },
+        {
+            "source_topic_id": "source",
+            "target_topic_id": "target",
+            "score": 0.81,
+            "method": "hybrid",
+            "algorithm_version": 2,
+        },
+    ]
+
+    graph = _graph_snapshot_from_rows(
+        topic_rows,
+        similarity_edges,
+        include_personas=False,
+    )
+    topic_nodes = [node for node in graph["nodes"] if node["type"] == "topic"]
+    cluster_nodes = [node for node in graph["nodes"] if node["type"] == "cluster"]
+    graph_edges = [edge for edge in graph["edges"] if edge["type"] == "SIMILAR_TO"]
+
+    assert len(topic_nodes) == 2
+    assert (
+        next(node for node in topic_nodes if node["topic_id"] == "source")["run_id"]
+        == "latest-run"
+    )
+    assert cluster_nodes == [
+        {
+            "id": "cluster:cluster-v2",
+            "type": "cluster",
+            "cluster_id": "cluster-v2",
+            "label": "V2 cluster",
+            "title": "V2 cluster",
+            "topic_count": 2,
+            "algorithm_version": 2,
+        }
+    ]
+    assert len(graph_edges) == 1
+    assert graph_edges[0]["algorithm_version"] == 2
+    assert graph_edges[0]["score"] == 0.81
+
+
+def test_recluster_plan_is_deterministic_and_keeps_controls_separate():
+    topics = [
+        {
+            "id": "ai-evals-one",
+            "title": "AI eval quality gates",
+            "summary": "AI eval quality gates for reliable product launches",
+            "channel": "blog",
+            "created_at": "2026-01-01T00:00:00Z",
+            "cluster_id": "legacy-ai",
+        },
+        {
+            "id": "ai-evals-two",
+            "title": "ROI and evals for AI launches",
+            "summary": "AI eval quality gates and ROI for reliable launches",
+            "channel": "podcast",
+            "created_at": "2026-01-02T00:00:00Z",
+            "cluster_id": "legacy-ai",
+        },
+        {
+            "id": "bmc",
+            "title": "Business Model Canvas",
+            "summary": "How to understand product strategy and customer value",
+            "channel": "podcast",
+            "created_at": "2026-01-03T00:00:00Z",
+            "cluster_id": "legacy-ai",
+        },
+        {
+            "id": "eudi",
+            "title": "EUDI Wallet onboarding",
+            "summary": "Digital identity trust and onboarding for EUDI Wallet",
+            "channel": "blog",
+            "created_at": "2026-01-04T00:00:00Z",
+            "cluster_id": "legacy-ai",
+        },
+    ]
+
+    first = build_recluster_plan(topics)
+    second = build_recluster_plan(topics)
+    by_id = {topic["topic_id"]: topic for topic in first["topics"]}
+
+    assert first == second
+    assert by_id["ai-evals-one"]["cluster_id"] == by_id["ai-evals-two"]["cluster_id"]
+    assert by_id["bmc"]["cluster_id"] != by_id["ai-evals-one"]["cluster_id"]
+    assert by_id["eudi"]["cluster_id"] != by_id["ai-evals-one"]["cluster_id"]
+    summary = summarize_recluster_plan(first)
+    assert summary["topic_count"] == 4
+    assert summary["before"] == {"topic_count": 4, "cluster_count": 1}
+    assert summary["after"]["topic_count"] == 4
+    assert summary["after"]["cluster_count"] == 3
+    assert summary["after"]["similarity_edge_count"] == 1
 
 
 def test_reviewer_memory_counts_same_persona_on_related_topics():
@@ -673,7 +960,9 @@ def test_reviewer_memory_counts_same_persona_on_related_topics():
 
     memory = build_persona_memory(personas, edges, [previous])
 
-    operator_memory = next(item for item in memory if item["persona_id"] == "operator-pm")
+    operator_memory = next(
+        item for item in memory if item["persona_id"] == "operator-pm"
+    )
     founder_memory = next(item for item in memory if item["persona_id"] == "founder-pm")
     assert operator_memory["related_topic_count"] == 1
     assert "product decision" in operator_memory["last_related_objection"]
@@ -751,14 +1040,22 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
                 return LLMChatResult(
                     content="not json",
                     model=model,
-                    usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                    usage={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 2,
+                        "total_tokens": 3,
+                    },
                     latency_ms=10,
                     finish_reason="stop",
                 )
             return LLMChatResult(
                 content=VALID_REACTION_JSON,
                 model=model,
-                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
                 latency_ms=20,
                 finish_reason="stop",
             )
@@ -773,7 +1070,9 @@ def test_live_runner_retries_invalid_json_with_high_quality_model():
     )
 
     result = runner.run(
-        AudienceRunInput(topic="Czy Agile ma jeszcze sens w 2026?", run_seed="retry-invalid"),
+        AudienceRunInput(
+            topic="Czy Agile ma jeszcze sens w 2026?", run_seed="retry-invalid"
+        ),
         personas=load_default_personas()[:1],
     )
 
@@ -803,14 +1102,22 @@ def test_live_runner_uses_larger_json_budget_for_schema_and_repair_calls():
                 return LLMChatResult(
                     content="{not valid json",
                     model=kwargs["model"],
-                    usage={"prompt_tokens": 1, "completion_tokens": 450, "total_tokens": 451},
+                    usage={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 450,
+                        "total_tokens": 451,
+                    },
                     latency_ms=10,
                     finish_reason="length",
                 )
             return LLMChatResult(
                 content=VALID_REACTION_JSON,
                 model=kwargs["model"],
-                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
                 latency_ms=20,
                 finish_reason="stop",
             )
@@ -819,7 +1126,9 @@ def test_live_runner_uses_larger_json_budget_for_schema_and_repair_calls():
     runner = AudienceLiveRunner(client_factory=lambda: client, max_workers=1)
 
     result = runner.run(
-        AudienceRunInput(topic="Czy PM powinien rozumieć CI/CD?", run_seed="json-budget"),
+        AudienceRunInput(
+            topic="Czy PM powinien rozumieć CI/CD?", run_seed="json-budget"
+        ),
         personas=load_default_personas()[:1],
     )
 
@@ -839,14 +1148,22 @@ def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
                 return LLMChatResult(
                     content="{not valid json",
                     model=kwargs["model"],
-                    usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                    usage={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 2,
+                        "total_tokens": 3,
+                    },
                     latency_ms=10,
                     finish_reason="stop",
                 )
             return LLMChatResult(
                 content=VALID_REACTION_JSON,
                 model=kwargs["model"],
-                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
                 latency_ms=20,
                 finish_reason="stop",
             )
@@ -857,7 +1174,9 @@ def test_live_runner_repairs_malformed_persona_json_before_high_quality_retry():
     )
 
     result = runner.run(
-        AudienceRunInput(topic="Czy Agile ma jeszcze sens w 2026?", run_seed="repair-invalid"),
+        AudienceRunInput(
+            topic="Czy Agile ma jeszcze sens w 2026?", run_seed="repair-invalid"
+        ),
         personas=load_default_personas()[:1],
     )
 
@@ -883,14 +1202,22 @@ def test_live_runner_retries_low_quality_with_visible_receipt_count():
                 return LLMChatResult(
                     content='{"reaction":"Looks interesting.","sentiment":"positive"}',
                     model=model,
-                    usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    usage={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
                     latency_ms=10,
                     finish_reason="stop",
                 )
             return LLMChatResult(
                 content=VALID_REACTION_JSON,
                 model=model,
-                usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
                 latency_ms=20,
                 finish_reason="stop",
             )
@@ -905,7 +1232,9 @@ def test_live_runner_retries_low_quality_with_visible_receipt_count():
     )
 
     result = runner.run(
-        AudienceRunInput(topic="Czy Agile ma jeszcze sens w 2026?", run_seed="retry-low"),
+        AudienceRunInput(
+            topic="Czy Agile ma jeszcze sens w 2026?", run_seed="retry-low"
+        ),
         personas=load_default_personas()[:1],
     )
 
@@ -989,7 +1318,11 @@ def test_live_recommendation_rewrites_when_skepticism_and_high_objections_domina
         ),
         reactions=[
             {
-                "stance": "skeptical" if index < 10 else "needs_translation" if index < 16 else "curious",
+                "stance": "skeptical"
+                if index < 10
+                else "needs_translation"
+                if index < 16
+                else "curious",
                 "channel_fit": "linkedin weak" if index < 12 else "blog medium",
             }
             for index in range(20)
@@ -1005,7 +1338,10 @@ def test_live_recommendation_rewrites_when_skepticism_and_high_objections_domina
 
     assert recommendation["decision"] == "rewrite"
     assert recommendation["action_scorecard"][0]["decision"] == "rewrite"
-    assert recommendation["action_scorecard"][0]["score"] > recommendation["action_scorecard"][1]["score"]
+    assert (
+        recommendation["action_scorecard"][0]["score"]
+        > recommendation["action_scorecard"][1]["score"]
+    )
 
 
 def test_live_runner_normalizes_loose_provider_json():
@@ -1050,7 +1386,9 @@ def test_live_runner_marks_generic_fallback_objections_as_low_quality():
     assert result.receipt["failed_persona_count"] == 2
     assert result.receipt["low_quality_persona_count"] == 2
     assert result.receipt["reliability_grade"] == "red"
-    assert {failure["error_kind"] for failure in result.failures} == {"low_quality_response"}
+    assert {failure["error_kind"] for failure in result.failures} == {
+        "low_quality_response"
+    }
 
 
 def test_live_audience_runner_failure_threshold_does_not_leak_topic():
@@ -1071,7 +1409,9 @@ def test_live_audience_runner_failure_threshold_does_not_leak_topic():
     assert diagnostics["receipt"]["failed_persona_count"] == 20
     assert diagnostics["receipt"]["reliability_grade"] == "red"
     assert diagnostics["partial_counts"]["reactions"] == 0
-    assert {failure["error_kind"] for failure in diagnostics["failures"]} == {"RuntimeError"}
+    assert {failure["error_kind"] for failure in diagnostics["failures"]} == {
+        "RuntimeError"
+    }
     assert "SECRET_PRIVATE_TOPIC" not in json.dumps(diagnostics)
 
 
@@ -1096,7 +1436,11 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
                 metadata=LLMChatResult(
                     content="{}",
                     model=model,
-                    usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                    usage={
+                        "prompt_tokens": 10,
+                        "completion_tokens": 20,
+                        "total_tokens": 30,
+                    },
                     latency_ms=123,
                     finish_reason="stop",
                 ),
@@ -1110,7 +1454,9 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
     )
 
     result = runner.run(
-        AudienceRunInput(topic="Should PMs care about AI harnesses?", run_seed="timeout"),
+        AudienceRunInput(
+            topic="Should PMs care about AI harnesses?", run_seed="timeout"
+        ),
         personas=personas,
     )
 
@@ -1155,3 +1501,21 @@ def test_audience_graph_smoke_receipt_is_sanitized(tmp_path):
     assert receipt["counts"]["reactions"] == 20
     assert receipt["raw_topic_stored"] is False
     assert "SECRET_PRIVATE_TOPIC" not in receipt_text
+
+
+def test_recluster_cli_requires_explicit_version_confirmation_for_apply():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "backend" / "scripts" / "recluster_audience_topics.py"),
+            "--apply",
+        ],
+        cwd=ROOT / "backend",
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode != 0
+    assert "--confirm-version 2" in result.stderr
