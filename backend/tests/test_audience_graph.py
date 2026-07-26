@@ -966,18 +966,72 @@ def test_recluster_plan_is_deterministic_and_keeps_controls_separate():
 
     first = build_recluster_plan(topics)
     second = build_recluster_plan(topics)
+    reversed_input = build_recluster_plan(reversed(topics))
     by_id = {topic["topic_id"]: topic for topic in first["topics"]}
 
     assert first == second
+    assert first == reversed_input
     assert by_id["ai-evals-one"]["cluster_id"] == by_id["ai-evals-two"]["cluster_id"]
     assert by_id["bmc"]["cluster_id"] != by_id["ai-evals-one"]["cluster_id"]
     assert by_id["eudi"]["cluster_id"] != by_id["ai-evals-one"]["cluster_id"]
     summary = summarize_recluster_plan(first)
     assert summary["topic_count"] == 4
-    assert summary["before"] == {"topic_count": 4, "cluster_count": 1}
+    assert summary["before"] == {
+        "topic_count": 4,
+        "cluster_count": 1,
+        "singleton_cluster_count": 0,
+        "largest_cluster_size": 4,
+    }
     assert summary["after"]["topic_count"] == 4
     assert summary["after"]["cluster_count"] == 3
     assert summary["after"]["similarity_edge_count"] == 1
+    assert summary["after"]["singleton_cluster_count"] == 2
+    assert summary["after"]["largest_cluster_size"] == 2
+
+
+def test_recluster_plan_merges_clusters_connected_by_a_strong_bridge():
+    topics = [
+        {
+            "id": "evals",
+            "title": "AI eval quality gates",
+            "summary": "Reliable AI eval quality gates before launch",
+            "channel": "blog",
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        {
+            "id": "roi",
+            "title": "AI ROI and inference costs",
+            "summary": "AI ROI measurement and inference costs after launch",
+            "channel": "podcast",
+            "created_at": "2026-01-02T00:00:00Z",
+        },
+        {
+            "id": "bridge",
+            "title": "AI eval ROI quality measurement",
+            "summary": (
+                "AI eval quality gates, ROI measurement, and inference costs "
+                "before and after launch"
+            ),
+            "channel": "linkedin",
+            "created_at": "2026-01-03T00:00:00Z",
+        },
+    ]
+
+    plan = build_recluster_plan(topics)
+    cluster_ids = {topic["cluster_id"] for topic in plan["topics"]}
+    strong_targets = {
+        edge["target_topic_id"]
+        for edge in plan["similarity_edges"]
+        if edge["source_topic_id"] == "bridge" and edge["cluster_match"]
+    }
+
+    assert strong_targets == {"evals", "roi"}
+    assert len(cluster_ids) == 1
+    assert {
+        edge["target_cluster_id"]
+        for edge in plan["similarity_edges"]
+        if edge["cluster_match"]
+    } == cluster_ids
 
 
 def test_reviewer_memory_counts_same_persona_on_related_topics():
