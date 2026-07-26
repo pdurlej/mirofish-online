@@ -1,5 +1,5 @@
 {
-  "name": "mirofish-offline",
+  "name": "mirofish-online",
   "version": "0.2.0",
   "description": "Synthetic audience graph for testing content, product, and market ideas with LLM personas and Neo4j memory",
   "scripts": {
