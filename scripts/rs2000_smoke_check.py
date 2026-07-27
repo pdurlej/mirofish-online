@@ -108,10 +108,20 @@ def validate_traefik_shape(services: dict[str, Any]) -> None:
             )
 
 
-def validate_neo4j_memory(services: dict[str, Any]) -> None:
+def validate_memory_limits(services: dict[str, Any]) -> None:
+    expected = {
+        "mirofish": 2 * 1024 * 1024 * 1024,
+        "neo4j": 2 * 1024 * 1024 * 1024,
+        "embedding-ollama": 1536 * 1024 * 1024,
+    }
+    for name, limit in expected.items():
+        require(
+            str(services[name].get("mem_limit")) == str(limit),
+            f"{name} mem_limit must be {limit} bytes",
+        )
+
     neo4j = services["neo4j"]
     env = neo4j.get("environment") or {}
-    require(str(neo4j.get("mem_limit")) == str(2 * 1024 * 1024 * 1024), "Neo4j mem_limit must be 2 GiB")
     require(env.get("NEO4J_server_memory_heap_max__size") == "1g", "Neo4j heap max must be 1g")
     require(env.get("NEO4J_server_memory_pagecache_size") == "512m", "Neo4j pagecache must be 512m")
 
@@ -171,7 +181,7 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
     validate_required_services(services)
     validate_host_local_ports(services)
     validate_traefik_shape(services)
-    validate_neo4j_memory(services)
+    validate_memory_limits(services)
     validate_lifecycle_shape(services)
     validate_persistent_volumes(services)
     return [
@@ -180,7 +190,7 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
         "all published ports are host-local",
         "Traefik routes UI port 3000 only",
         "Traefik uses the platform TLS certresolver le",
-        "Neo4j memory limit is bounded to 2 GiB",
+        "MiroFish, Neo4j, and embedding Ollama have explicit memory limits",
         "Neo4j/Bolt/backend/Ollama are not joined to platform-proxy",
         "application starts drained and waits for healthy dependencies",
         "Neo4j and Ollama use persistent named volumes",

@@ -5,6 +5,11 @@
     "embedding_ollama_data"
   ],
   "default_embedding_model": "nomic-embed-text",
+  "memory_limits": {
+    "mirofish": "2g",
+    "neo4j": "2g",
+    "embedding-ollama": "1536m"
+  },
   "service_stop_order": [
     "mirofish",
     "embedding-ollama",

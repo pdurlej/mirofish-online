@@ -5,6 +5,7 @@ services:
     build:
       context: ../..
     container_name: mirofish-online
+    mem_limit: 2g
     env_file:
       - path: ../../.env
         required: false
@@ -75,6 +76,7 @@ services:
   embedding-ollama:
     image: ollama/ollama:latest
     container_name: mirofish-online-embedding-ollama
+    mem_limit: 1536m
     ports:
       - "127.0.0.1:11435:11434"
     volumes:

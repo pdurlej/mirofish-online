@@ -213,6 +213,9 @@ def test_volume_and_model_metadata_contract_is_preserved():
 
     for volume in contract["persistent_volumes"]:
         assert volume in compose_text
+    for service, limit in contract["memory_limits"].items():
+        assert f"{service}:" in compose_text
+        assert f"mem_limit: {limit}" in compose_text
     assert (
         f"EMBEDDING_MODEL={contract['default_embedding_model']}"
         in env_text
