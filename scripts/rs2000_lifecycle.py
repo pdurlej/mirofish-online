@@ -205,24 +205,29 @@ def start_stack(
 
 
 def stop_stack(env_file: Path, *, wait_seconds: int) -> None:
-    control(env_file, "drain")
-    try:
-        wait_for(
-            "in-process work to become idle",
-            lambda: bool(
-                (control(env_file, "status").get("lifecycle") or {}).get("idle")
-            ),
-            wait_seconds,
-        )
-    except LifecycleError:
+    running = running_services(env_file)
+    if "mirofish" in running:
+        control(env_file, "drain")
         try:
-            control(env_file, "resume")
+            wait_for(
+                "in-process work to become idle",
+                lambda: bool(
+                    (control(env_file, "status").get("lifecycle") or {}).get(
+                        "idle"
+                    )
+                ),
+                wait_seconds,
+            )
         except LifecycleError:
-            pass
-        raise
-    run_compose(env_file, "stop", "mirofish")
-    run_compose(env_file, "stop", "embedding-ollama")
-    run_compose(env_file, "stop", "neo4j")
+            try:
+                control(env_file, "resume")
+            except LifecycleError:
+                pass
+            raise
+
+    for service in ("mirofish", "embedding-ollama", "neo4j"):
+        if service in running:
+            run_compose(env_file, "stop", service)
 
 
 def status(env_file: Path) -> dict[str, Any]:

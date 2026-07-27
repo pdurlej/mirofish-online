@@ -109,6 +109,11 @@ def test_stop_drains_refuses_busy_and_never_stops_services(monkeypatch):
         "run_command",
         lambda command: commands.append(command) or completed(command),
     )
+    monkeypatch.setattr(
+        lifecycle,
+        "running_services",
+        lambda _env: {"mirofish", "embedding-ollama", "neo4j"},
+    )
 
     with pytest.raises(lifecycle.LifecycleError, match="timed out"):
         lifecycle.stop_stack(ENV_FILE, wait_seconds=0)
@@ -131,12 +136,44 @@ def test_stop_orders_app_ollama_neo4j_after_idle(monkeypatch):
         "run_command",
         lambda command: commands.append(command) or completed(command),
     )
+    monkeypatch.setattr(
+        lifecycle,
+        "running_services",
+        lambda _env: {"mirofish", "embedding-ollama", "neo4j"},
+    )
 
     lifecycle.stop_stack(ENV_FILE, wait_seconds=0)
 
     assert controls == ["drain", "status"]
     assert [command[-2:] for command in commands] == [
         ["stop", "mirofish"],
+        ["stop", "embedding-ollama"],
+        ["stop", "neo4j"],
+    ]
+
+
+def test_stop_is_idempotent_and_cleans_orphaned_dependencies(monkeypatch):
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        lifecycle,
+        "running_services",
+        lambda _env: {"embedding-ollama", "neo4j"},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "control",
+        lambda *_args: pytest.fail("stopped application must not be contacted"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "run_command",
+        lambda command: commands.append(command) or completed(command),
+    )
+
+    lifecycle.stop_stack(ENV_FILE, wait_seconds=0)
+
+    assert [command[-2:] for command in commands] == [
         ["stop", "embedding-ollama"],
         ["stop", "neo4j"],
     ]
