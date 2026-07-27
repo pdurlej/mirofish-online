@@ -116,6 +116,50 @@ def validate_neo4j_memory(services: dict[str, Any]) -> None:
     require(env.get("NEO4J_server_memory_pagecache_size") == "512m", "Neo4j pagecache must be 512m")
 
 
+def volume_sources(service: dict[str, Any]) -> set[str]:
+    return {
+        str(mount.get("source"))
+        for mount in service.get("volumes") or []
+        if isinstance(mount, dict) and mount.get("type") == "volume"
+    }
+
+
+def validate_lifecycle_shape(services: dict[str, Any]) -> None:
+    mirofish = services["mirofish"]
+    neo4j = services["neo4j"]
+    embedding = services["embedding-ollama"]
+    dependencies = mirofish.get("depends_on") or {}
+    environment = mirofish.get("environment") or {}
+
+    require(
+        environment.get("MIROFISH_START_DRAINED") == "true",
+        "mirofish must start drained until the operator readiness gate resumes it",
+    )
+    require(bool(mirofish.get("healthcheck")), "mirofish must have a liveness healthcheck")
+    require(bool(embedding.get("healthcheck")), "embedding-ollama must have a healthcheck")
+    require(
+        (dependencies.get("neo4j") or {}).get("condition") == "service_healthy",
+        "mirofish must wait for healthy Neo4j",
+    )
+    require(
+        (dependencies.get("embedding-ollama") or {}).get("condition") == "service_healthy",
+        "mirofish must wait for healthy embedding-ollama",
+    )
+    require(bool(mirofish.get("stop_grace_period")), "mirofish needs a graceful stop period")
+    require(bool(neo4j.get("stop_grace_period")), "Neo4j needs a graceful stop period")
+
+
+def validate_persistent_volumes(services: dict[str, Any]) -> None:
+    require(
+        volume_sources(services["neo4j"]) == {"neo4j_data", "neo4j_logs"},
+        "Neo4j data and logs must remain named volumes",
+    )
+    require(
+        volume_sources(services["embedding-ollama"]) == {"embedding_ollama_data"},
+        "Ollama model metadata must remain on a named volume",
+    )
+
+
 def validate_required_services(services: dict[str, Any]) -> None:
     required = {"mirofish", "neo4j", "embedding-ollama"}
     missing = sorted(required - set(services))
@@ -128,6 +172,8 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
     validate_host_local_ports(services)
     validate_traefik_shape(services)
     validate_neo4j_memory(services)
+    validate_lifecycle_shape(services)
+    validate_persistent_volumes(services)
     return [
         "compose renders as JSON",
         "required services exist",
@@ -136,6 +182,8 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
         "Traefik uses the platform TLS certresolver le",
         "Neo4j memory limit is bounded to 2 GiB",
         "Neo4j/Bolt/backend/Ollama are not joined to platform-proxy",
+        "application starts drained and waits for healthy dependencies",
+        "Neo4j and Ollama use persistent named volumes",
     ]
 
 
@@ -152,10 +200,11 @@ def validate_runtime() -> list[str]:
     ui_port = os.environ.get("MIROFISH_UI_PORT", "13000")
     api_port = os.environ.get("MIROFISH_API_PORT", "15001")
     http_probe(f"http://127.0.0.1:{ui_port}/")
-    http_probe(f"http://127.0.0.1:{api_port}/health")
+    http_probe(f"http://127.0.0.1:{api_port}/health/live")
+    http_probe(f"http://127.0.0.1:{api_port}/health/ready")
     return [
         f"UI answered on 127.0.0.1:{ui_port}",
-        f"backend health answered on 127.0.0.1:{api_port}",
+        f"backend liveness and readiness answered on 127.0.0.1:{api_port}",
     ]
 
 

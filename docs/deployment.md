@@ -40,6 +40,46 @@ Render the checked-in profile before adapting it:
 npm run check:compose
 ```
 
+## RS2000 On-Demand Lifecycle
+
+The dedicated RS2000 stack is operator-driven. It does not use an inactivity
+timer and it never removes containers or volumes as part of normal lifecycle
+management.
+
+Check the count-only state:
+
+```bash
+npm run lifecycle:status
+```
+
+Start dependencies first, confirm the configured embedding model is already
+present, then make the application ready:
+
+```bash
+npm run lifecycle:start
+```
+
+Drain new mutating requests, wait for all tracked work to become idle, then
+stop the application, embedding Ollama, and Neo4j:
+
+```bash
+npm run lifecycle:stop
+```
+
+`stop` refuses to continue while audience runs, graph tasks, simulation
+processes, monitors, graph-memory updaters, or API requests are active. There
+is no force mode. If the idle wait expires, the script attempts a
+readiness-gated resume before returning the refusal. The control endpoints
+reject non-loopback callers and are invoked only through `docker compose exec`;
+the repository does not add a new HTTP authentication scheme.
+
+The lifecycle path observes state with `docker compose ps`, controls the
+application through `exec`, and mutates service state only with `start` and
+`stop`. A failed start rolls back only services that were not already running.
+Provisioning and image replacement are separate rollout operations. Never use
+`down -v` for lifecycle or rollback: `neo4j_data`, `neo4j_logs`, and
+`embedding_ollama_data` are persistent recovery boundaries.
+
 ## Preflight
 
 Before the first real audience run:
@@ -50,7 +90,8 @@ npm run check
 
 Then verify:
 
-- the health endpoint is reachable through the intended route;
+- `/health/live` and `/health/ready` are reachable through the intended route;
+- readiness fails closed when Neo4j or the configured Ollama model is absent;
 - Neo4j and embedding endpoints are not unintentionally public;
 - the configured chat provider matches your data-handling expectations;
 - logs and receipts do not include credentials or raw provider errors;

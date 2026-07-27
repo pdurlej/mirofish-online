@@ -67,6 +67,18 @@ class AudienceRunManager:
             return {"run_id": run_id, "status": "completed", "data": stored}
         return None
 
+    def active_work(self) -> dict[str, int]:
+        """Return count-only queue state for lifecycle decisions."""
+        with self._lock:
+            return {
+                "queued": len(self._queue),
+                "running": sum(
+                    record.get("status") == "running"
+                    for record in self._records.values()
+                ),
+                "worker": int(bool(self._worker and self._worker.is_alive())),
+            }
+
     def _ensure_worker_locked(self) -> None:
         if self._worker and self._worker.is_alive():
             return

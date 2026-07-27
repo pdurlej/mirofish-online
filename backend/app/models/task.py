@@ -169,6 +169,20 @@ class TaskManager:
                 tasks = [t for t in tasks if t.task_type == task_type]
             return [t.to_dict() for t in sorted(tasks, key=lambda x: x.created_at, reverse=True)]
 
+    def active_work(self) -> Dict[str, int]:
+        """Return task counts without identifiers, metadata, or payloads."""
+        with self._task_lock:
+            return {
+                "pending": sum(
+                    task.status == TaskStatus.PENDING
+                    for task in self._tasks.values()
+                ),
+                "processing": sum(
+                    task.status == TaskStatus.PROCESSING
+                    for task in self._tasks.values()
+                ),
+            }
+
     def cleanup_old_tasks(self, max_age_hours: int = 24):
         """Clean up old tasks"""
         from datetime import timedelta
@@ -181,4 +195,3 @@ class TaskManager:
             ]
             for tid in old_ids:
                 del self._tasks[tid]
-

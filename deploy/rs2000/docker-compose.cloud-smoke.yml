@@ -8,6 +8,8 @@ services:
     env_file:
       - path: ../../.env
         required: false
+    environment:
+      - MIROFISH_START_DRAINED=true
     ports:
       - "127.0.0.1:${MIROFISH_UI_PORT:-13000}:3000"
       - "127.0.0.1:${MIROFISH_API_PORT:-15001}:5001"
@@ -27,7 +29,18 @@ services:
       neo4j:
         condition: service_healthy
       embedding-ollama:
-        condition: service_started
+        condition: service_healthy
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health/live', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - mirofish-private
       - platform-proxy
@@ -49,6 +62,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     restart: unless-stopped
+    stop_grace_period: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
@@ -66,6 +80,12 @@ services:
     volumes:
       - embedding_ollama_data:/root/.ollama
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     networks:
       - mirofish-private
 
