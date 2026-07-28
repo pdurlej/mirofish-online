@@ -9,11 +9,16 @@ import warnings
 # Must be set before all other imports
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
-from flask import Flask, request
-from flask_cors import CORS
+from flask import Flask, request  # noqa: E402
+from flask_cors import CORS  # noqa: E402
 
-from .config import Config
-from .utils.logger import setup_logger, get_logger
+from .config import Config  # noqa: E402
+from .lifecycle import (  # noqa: E402
+    LifecycleState,
+    register_default_work_providers,
+    register_lifecycle,
+)
+from .utils.logger import setup_logger, get_logger  # noqa: E402
 
 
 def create_app(config_class=Config):
@@ -54,6 +59,15 @@ def create_app(config_class=Config):
         # Store None so endpoints can return 503 gracefully
         app.extensions['neo4j_storage'] = None
 
+    from .storage.embedding_service import EmbeddingService
+    app.extensions['embedding_service'] = EmbeddingService(max_retries=1, timeout=3)
+
+    lifecycle = LifecycleState(
+        start_drained=bool(app.config.get("MIROFISH_START_DRAINED", False))
+    )
+    register_default_work_providers(lifecycle)
+    register_lifecycle(app, lifecycle)
+
     # Register simulation process cleanup function (ensure all simulation processes terminate on server shutdown)
     from .services.simulation_runner import SimulationRunner
     SimulationRunner.register_cleanup()
@@ -90,11 +104,6 @@ def create_app(config_class=Config):
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
     app.register_blueprint(audience_bp, url_prefix='/api/audience')
-
-    # Health check
-    @app.route('/health')
-    def health():
-        return {'status': 'ok', 'service': 'MiroFish-Offline Backend'}
 
     if should_log_startup:
         logger.info("MiroFish-Offline Backend startup complete")

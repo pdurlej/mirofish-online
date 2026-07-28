@@ -4,16 +4,13 @@ Graph memory update service that processes agent activities and updates them to 
 Replaces zep_graph_memory_updater.py — Zep client replaced by GraphStorage.
 """
 
-import os
 import time
 import threading
-import json
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from queue import Queue, Empty
 
-from ..config import Config
 from ..utils.logger import get_logger
 from ..storage import GraphStorage
 
@@ -451,4 +448,19 @@ class GraphMemoryManager:
         return {
             sim_id: updater.get_stats()
             for sim_id, updater in cls._updaters.items()
+        }
+
+    @classmethod
+    def active_work(cls) -> Dict[str, int]:
+        """Return updater counts without simulation or graph identifiers."""
+        with cls._lock:
+            stats = [updater.get_stats() for updater in cls._updaters.values()]
+        return {
+            "updaters": len(stats),
+            "running": sum(bool(item.get("running")) for item in stats),
+            "queued_items": sum(int(item.get("queue_size") or 0) for item in stats),
+            "buffered_items": sum(
+                sum(int(value) for value in (item.get("buffer_sizes") or {}).values())
+                for item in stats
+            ),
         }

@@ -23,6 +23,9 @@ class Config:
     # Flask configuration
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
+    MIROFISH_START_DRAINED = (
+        os.environ.get('MIROFISH_START_DRAINED', 'false').lower() == 'true'
+    )
 
     # JSON configuration - disable ASCII escaping to display Chinese directly (not as \uXXXX)
     JSON_AS_ASCII = False

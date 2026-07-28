@@ -8,7 +8,6 @@ Uses Ollama's /api/embed endpoint for vector generation (768 dimensions).
 import time
 import logging
 from typing import List, Optional
-from functools import lru_cache
 
 import requests
 
@@ -196,6 +195,32 @@ class EmbeddingService:
             vec = self.embed("health check")
             return len(vec) > 0
         except Exception:
+            return False
+
+    def readiness_check(self) -> bool:
+        """Check Ollama and confirm the configured model is already present."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/tags",
+                timeout=min(self.timeout, 5),
+            )
+            response.raise_for_status()
+            models = response.json().get("models") or []
+            configured = self.model.removesuffix(":latest")
+            return any(
+                str(model.get("name") or model.get("model") or "")
+                .removesuffix(":latest")
+                == configured
+                for model in models
+                if isinstance(model, dict)
+            )
+        except (
+            requests.RequestException,
+            AttributeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
             return False
 
 

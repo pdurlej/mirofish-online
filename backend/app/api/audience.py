@@ -30,6 +30,11 @@ _RUN_MANAGER = AudienceRunManager(
 )
 
 
+def audience_active_work() -> dict[str, int]:
+    """Expose sanitized in-process work counts to the lifecycle coordinator."""
+    return _RUN_MANAGER.active_work()
+
+
 def _get_store():
     storage = current_app.extensions.get("neo4j_storage")
     if storage:
