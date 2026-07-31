@@ -40,7 +40,7 @@ DEFAULT_TOPICS = [
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:13000")
+    parser.add_argument("--base-url", default="http://127.0.0.1:15001")
     parser.add_argument("--mode", choices=("fake", "live"), default="live")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=900)

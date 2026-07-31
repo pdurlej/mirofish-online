@@ -151,9 +151,9 @@ def validate_lifecycle_shape(services: dict[str, Any]) -> None:
         "mirofish must serve the SPA and API from internal port 3000",
     )
     require(
-        len(published_ports(mirofish)) == 2
+        len(published_ports(mirofish)) == 1
         and {str(port.get("target")) for port in published_ports(mirofish)} == {"3000"},
-        "both host-local MiroFish entry points must target internal port 3000",
+        "the host-local MiroFish entry point must target internal port 3000",
     )
     healthcheck = mirofish.get("healthcheck") or {}
     healthcheck_command = " ".join(str(part) for part in healthcheck.get("test") or [])
@@ -223,14 +223,12 @@ def http_probe(url: str) -> None:
 
 
 def validate_runtime() -> list[str]:
-    ui_port = os.environ.get("MIROFISH_UI_PORT", "13000")
     api_port = os.environ.get("MIROFISH_API_PORT", "15001")
-    http_probe(f"http://127.0.0.1:{ui_port}/")
+    http_probe(f"http://127.0.0.1:{api_port}/")
     http_probe(f"http://127.0.0.1:{api_port}/health/live")
     http_probe(f"http://127.0.0.1:{api_port}/health/ready")
     return [
-        f"UI answered on 127.0.0.1:{ui_port}",
-        f"backend liveness and readiness answered on 127.0.0.1:{api_port}",
+        f"UI, liveness, and readiness answered on 127.0.0.1:{api_port}",
     ]
 
 
