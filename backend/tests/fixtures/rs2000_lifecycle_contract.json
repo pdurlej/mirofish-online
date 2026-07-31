@@ -5,6 +5,7 @@
     "embedding_ollama_data"
   ],
   "default_embedding_model": "nomic-embed-text",
+  "internal_http_port": 3000,
   "memory_limits": {
     "mirofish": "2g",
     "neo4j": "2g",

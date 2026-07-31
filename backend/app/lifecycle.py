@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
@@ -15,7 +16,10 @@ from flask import Flask, g, jsonify, request
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1"})
-CONTROL_BASE_URL = "http://127.0.0.1:5001/internal/lifecycle"
+CONTROL_BASE_URL = (
+    f"http://127.0.0.1:{os.environ.get('FLASK_PORT', '5001')}"
+    "/internal/lifecycle"
+)
 
 CountProvider = Callable[[], Mapping[str, int]]
 ReadinessProbe = Callable[[], Mapping[str, bool]]

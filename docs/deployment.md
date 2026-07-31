@@ -40,6 +40,11 @@ Render the checked-in profile before adapting it:
 npm run check:compose
 ```
 
+The production image uses a multi-stage build. Node and Vite compile the Vue
+application in the build stage only; the final image serves the generated SPA
+and API from one Gunicorn process. Local development remains split between the
+Vite dev server on port 3000 and Flask on port 5001.
+
 ## RS2000 On-Demand Lifecycle
 
 The dedicated RS2000 stack is operator-driven. It does not use an inactivity

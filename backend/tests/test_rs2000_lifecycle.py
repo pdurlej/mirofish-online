@@ -220,5 +220,9 @@ def test_volume_and_model_metadata_contract_is_preserved():
         f"EMBEDDING_MODEL={contract['default_embedding_model']}"
         in env_text
     )
+    internal_port = contract["internal_http_port"]
+    assert f"FLASK_PORT={internal_port}" in compose_text
+    assert compose_text.count(f":{internal_port}\"") >= 2
+    assert f"127.0.0.1:{internal_port}/health/live" in compose_text
     for action in contract["forbidden_compose_actions"]:
         assert f'"{action}"' not in script_text

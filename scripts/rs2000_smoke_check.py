@@ -2,8 +2,9 @@
 """Validate the RS2000 private smoke profile without printing secrets.
 
 Default mode renders Docker Compose and checks the intended exposure shape:
-only host-local published ports, Traefik pointed at the UI port, Neo4j memory
-bounded to 2 GiB, and no raw backend/Neo4j/Ollama service exposed via Traefik.
+only host-local published ports, Traefik pointed at the unified application
+port, Neo4j memory bounded to 2 GiB, and no raw Neo4j/Ollama service exposed
+via Traefik.
 
 Runtime mode adds localhost HTTP probes, but still never starts or mutates the
 stack. It is meant for an operator-approved private RS2000 smoke run.
@@ -145,6 +146,21 @@ def validate_lifecycle_shape(services: dict[str, Any]) -> None:
         environment.get("MIROFISH_START_DRAINED") == "true",
         "mirofish must start drained until the operator readiness gate resumes it",
     )
+    require(
+        str(environment.get("FLASK_PORT")) == "3000",
+        "mirofish must serve the SPA and API from internal port 3000",
+    )
+    require(
+        len(published_ports(mirofish)) == 2
+        and {str(port.get("target")) for port in published_ports(mirofish)} == {"3000"},
+        "both host-local MiroFish entry points must target internal port 3000",
+    )
+    healthcheck = mirofish.get("healthcheck") or {}
+    healthcheck_command = " ".join(str(part) for part in healthcheck.get("test") or [])
+    require(
+        "127.0.0.1:3000/health/live" in healthcheck_command,
+        "mirofish liveness check must use the unified application port 3000",
+    )
     require(bool(mirofish.get("healthcheck")), "mirofish must have a liveness healthcheck")
     require(bool(embedding.get("healthcheck")), "embedding-ollama must have a healthcheck")
     require(
@@ -188,10 +204,10 @@ def validate_compose(config: dict[str, Any]) -> list[str]:
         "compose renders as JSON",
         "required services exist",
         "all published ports are host-local",
-        "Traefik routes UI port 3000 only",
+        "Traefik routes the unified application port 3000 only",
         "Traefik uses the platform TLS certresolver le",
         "MiroFish, Neo4j, and embedding Ollama have explicit memory limits",
-        "Neo4j/Bolt/backend/Ollama are not joined to platform-proxy",
+        "Neo4j/Bolt/Ollama are not joined to platform-proxy",
         "application starts drained and waits for healthy dependencies",
         "Neo4j and Ollama use persistent named volumes",
     ]
