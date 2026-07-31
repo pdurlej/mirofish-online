@@ -14,6 +14,7 @@
     "check:ruff": "python3 scripts/ruff_changed.py",
     "check:secrets": "python3 scripts/check_secrets.py",
     "check:smoke": "python3 scripts/rs2000_smoke_check.py",
+    "benchmark:audience-context-memory": "cd backend && uv run python scripts/benchmark_audience_context_memory.py",
     "lifecycle:status": "python3 scripts/rs2000_lifecycle.py status --json",
     "lifecycle:start": "python3 scripts/rs2000_lifecycle.py start",
     "lifecycle:stop": "python3 scripts/rs2000_lifecycle.py stop",

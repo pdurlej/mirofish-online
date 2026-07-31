@@ -17,10 +17,14 @@ def base_ref() -> str:
 
 def changed_files() -> list[str]:
     candidates: set[str] = set()
-    ranges = [f"{base_ref()}...HEAD", "HEAD"]
-    for revision_range in ranges:
+    commands = [
+        ["git", "diff", "--name-only", f"{base_ref()}...HEAD"],
+        ["git", "diff", "--name-only"],
+        ["git", "diff", "--name-only", "--cached"],
+    ]
+    for command in commands:
         result = subprocess.run(
-            ["git", "diff", "--name-only", revision_range],
+            command,
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,
@@ -28,7 +32,6 @@ def changed_files() -> list[str]:
         )
         if result.returncode == 0:
             candidates.update(result.stdout.splitlines())
-            break
 
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
