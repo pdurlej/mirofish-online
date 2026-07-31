@@ -101,6 +101,7 @@ def probe_json(url: str) -> dict[str, Any] | None:
     except (
         urllib.error.URLError,
         TimeoutError,
+        ConnectionError,
         UnicodeDecodeError,
         json.JSONDecodeError,
     ):
@@ -115,7 +116,7 @@ def probe_http(url: str) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             return 200 <= response.status < 500
-    except (urllib.error.URLError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
         return False
 
 

@@ -22,6 +22,16 @@ def completed(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
+def test_probes_treat_connection_resets_as_not_ready(monkeypatch):
+    def reset_connection(*_args, **_kwargs):
+        raise ConnectionResetError("service is still starting")
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", reset_connection)
+
+    assert lifecycle.probe_json("http://service.test/health") is None
+    assert lifecycle.probe_http("http://service.test/health") is False
+
+
 def test_start_orders_dependencies_model_check_app_and_resume(monkeypatch):
     commands: list[list[str]] = []
     controls: list[str] = []
@@ -222,7 +232,7 @@ def test_volume_and_model_metadata_contract_is_preserved():
     )
     internal_port = contract["internal_http_port"]
     assert f"FLASK_PORT={internal_port}" in compose_text
-    assert compose_text.count(f":{internal_port}\"") >= 2
+    assert compose_text.count(f":{internal_port}\"") == 1
     assert f"127.0.0.1:{internal_port}/health/live" in compose_text
     for action in contract["forbidden_compose_actions"]:
         assert f'"{action}"' not in script_text
