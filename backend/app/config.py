@@ -4,6 +4,7 @@ Loads configuration from .env file in project root directory
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # Load .env file from project root
@@ -49,6 +50,9 @@ class Config:
     )
     MIROFISH_AUDIENCE_MAX_WORKERS = int(
         os.environ.get('MIROFISH_AUDIENCE_MAX_WORKERS', '10')
+    )
+    MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS = int(
+        os.environ.get('MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS', '64')
     )
 
     # Neo4j configuration
