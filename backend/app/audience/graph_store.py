@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from typing import Any, Protocol
 
 from .audience_run import AudienceRunResult
@@ -33,12 +34,16 @@ class AudienceGraphStore(Protocol):
 
 
 class InMemoryAudienceGraphStore:
-    def __init__(self) -> None:
-        self._runs: dict[str, dict[str, Any]] = {}
+    def __init__(self, *, max_runs: int = 128) -> None:
+        self._max_runs = max(1, int(max_runs))
+        self._runs: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
     def write_run(self, result: AudienceRunResult) -> dict[str, Any]:
         payload = result.to_dict()
         self._runs[result.run_id] = payload
+        self._runs.move_to_end(result.run_id)
+        while len(self._runs) > self._max_runs:
+            self._runs.popitem(last=False)
         return _write_counts(payload)
 
     def read_run(self, run_id: str) -> dict[str, Any] | None:
@@ -360,8 +365,34 @@ class Neo4jAudienceGraphStore:
                 WITH t, r
                 ORDER BY r.created_at DESC
                 WITH t, head(collect(r)) AS latest_run
-                RETURN latest_run.payload_json AS payload_json,
-                       latest_run.created_at AS created_at,
+                WHERE latest_run IS NOT NULL
+                ORDER BY coalesce(t.updated_at, latest_run.created_at) DESC
+                LIMIT $limit
+                CALL {
+                    WITH latest_run
+                    OPTIONAL MATCH (latest_run)-[:HAS_REACTION]->(reaction:AudienceReaction)
+                    OPTIONAL MATCH (persona:AudiencePersona)-[:GAVE_REACTION]->(reaction)
+                    RETURN collect(DISTINCT CASE
+                        WHEN reaction IS NULL OR persona IS NULL THEN null
+                        ELSE {
+                            persona_id: persona.persona_id,
+                            summary: reaction.summary
+                        }
+                    END) AS reactions
+                }
+                CALL {
+                    WITH latest_run
+                    OPTIONAL MATCH (latest_run)-[:HAS_OBJECTION]->(objection:AudienceObjection)
+                    OPTIONAL MATCH (persona:AudiencePersona)-[:RAISED_OBJECTION]->(objection)
+                    RETURN collect(DISTINCT CASE
+                        WHEN objection IS NULL OR persona IS NULL THEN null
+                        ELSE {
+                            persona_id: persona.persona_id,
+                            text: objection.text
+                        }
+                    END) AS objections
+                }
+                RETURN latest_run.created_at AS created_at,
                        t.topic_id AS id,
                        t.topic_hash AS topic_hash,
                        t.summary AS summary,
@@ -369,9 +400,9 @@ class Neo4jAudienceGraphStore:
                        t.channel AS channel,
                        coalesce(t.cluster_v2_id, t.cluster_id) AS cluster_id,
                        coalesce(t.cluster_v2_label, t.cluster_label) AS cluster_label,
-                       coalesce(t.cluster_version, 1) AS cluster_version
-                ORDER BY t.updated_at DESC
-                LIMIT $limit
+                       coalesce(t.cluster_version, 1) AS cluster_version,
+                       reactions AS reactions,
+                       objections AS objections
                 """,
                 limit=limit,
             )
@@ -942,9 +973,23 @@ def _previous_topic_from_record(record: dict[str, Any]) -> dict[str, Any]:
         "cluster_label": record.get("cluster_label"),
         "cluster_version": record.get("cluster_version", 1),
         "created_at": record.get("created_at"),
-        "reactions": [],
-        "objections": [],
+        "reactions": _compact_persona_rows(record.get("reactions"), "summary"),
+        "objections": _compact_persona_rows(record.get("objections"), "text"),
     }
+
+
+def _compact_persona_rows(value: Any, text_field: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for item in value or []:
+        if not isinstance(item, dict) or not item.get("persona_id"):
+            continue
+        rows.append(
+            {
+                "persona_id": str(item["persona_id"]),
+                text_field: str(item.get(text_field) or ""),
+            }
+        )
+    return rows
 
 
 def _similar_topics_from_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:

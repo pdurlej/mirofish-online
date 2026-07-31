@@ -4,6 +4,7 @@ Loads configuration from .env file in project root directory
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # Load .env file from project root
@@ -23,6 +24,9 @@ class Config:
     # Flask configuration
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
+    MIROFISH_START_DRAINED = (
+        os.environ.get('MIROFISH_START_DRAINED', 'false').lower() == 'true'
+    )
 
     # JSON configuration - disable ASCII escaping to display Chinese directly (not as \uXXXX)
     JSON_AS_ASCII = False
@@ -46,6 +50,9 @@ class Config:
     )
     MIROFISH_AUDIENCE_MAX_WORKERS = int(
         os.environ.get('MIROFISH_AUDIENCE_MAX_WORKERS', '10')
+    )
+    MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS = int(
+        os.environ.get('MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS', '64')
     )
 
     # Neo4j configuration

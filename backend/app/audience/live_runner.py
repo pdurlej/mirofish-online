@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -119,6 +125,30 @@ class PersonaCallResult:
     high_quality_retry_used: bool = False
 
 
+class _RunClient:
+    """Lazily create and own one thread-safe HTTP client for a single run."""
+
+    def __init__(self, factory: Callable[[], LLMClient]) -> None:
+        self._factory = factory
+        self._lock = threading.Lock()
+        self._client: LLMClient | None = None
+
+    def get(self) -> LLMClient:
+        with self._lock:
+            if self._client is None:
+                self._client = self._factory()
+            return self._client
+
+    def close(self) -> None:
+        with self._lock:
+            client = self._client
+            self._client = None
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+
+
 GENERIC_OBJECTION_FALLBACKS = {
     "this needs a clearer practical consequence.",
     "this needs a clearer practical consequence for the audience.",
@@ -188,6 +218,7 @@ class AudienceLiveRunner:
 
         future_map = {}
         timed_out = False
+        run_client = _RunClient(self._client_factory)
         executor = ThreadPoolExecutor(max_workers=self._max_workers)
         try:
             for persona in active_personas:
@@ -198,6 +229,7 @@ class AudienceLiveRunner:
                     run_input,
                     persona,
                     assignment.model,
+                    run_client.get,
                 )
                 future_map[future] = (persona, assignment)
 
@@ -287,6 +319,10 @@ class AudienceLiveRunner:
                 _record_failure(receipt, assignment.model)
         finally:
             executor.shutdown(wait=not timed_out, cancel_futures=True)
+            if timed_out:
+                self._close_client_when_futures_finish(run_client, list(future_map))
+            else:
+                run_client.close()
 
         receipt["latency_ms"] = int((time.monotonic() - started) * 1000)
         receipt["failed_persona_count"] = len(failures)
@@ -356,14 +392,44 @@ class AudienceLiveRunner:
         except Exception:  # noqa: BLE001
             return None
 
+    @staticmethod
+    def _close_client_when_futures_finish(
+        run_client: _RunClient, futures: list[Future[Any]]
+    ) -> None:
+        pending = [future for future in futures if not future.done()]
+        if not pending:
+            run_client.close()
+            return
+
+        remaining = len(pending)
+        completion_lock = threading.Lock()
+
+        def release_after_last_future(_future: Future[Any]) -> None:
+            nonlocal remaining
+            should_release = False
+            with completion_lock:
+                remaining -= 1
+                should_release = remaining == 0
+            if should_release:
+                run_client.close()
+
+        for future in pending:
+            future.add_done_callback(release_after_last_future)
+
     def _call_persona_with_retry(
         self,
         run_input: AudienceRunInput,
         persona: AudiencePersona,
         model: str,
+        client_provider: Callable[[], LLMClient] | None = None,
     ) -> PersonaCallResult:
         try:
-            call = self._call_persona(run_input, persona, model)
+            call = self._call_persona(
+                run_input,
+                persona,
+                model,
+                client_provider=client_provider,
+            )
             return _ensure_success_attempts(call, high_quality_retry=False)
         except PersonaCallFailed as exc:
             if not _should_high_quality_retry(exc.error_kind, model, self._model_router.high_quality_retry_model):
@@ -375,6 +441,7 @@ class AudienceLiveRunner:
                     persona,
                     retry_model,
                     high_quality_retry=True,
+                    client_provider=client_provider,
                 )
                 retry_call = _ensure_success_attempts(retry_call, high_quality_retry=True)
                 return PersonaCallResult(
@@ -398,8 +465,9 @@ class AudienceLiveRunner:
         model: str,
         *,
         high_quality_retry: bool = False,
+        client_provider: Callable[[], LLMClient] | None = None,
     ) -> PersonaCallResult:
-        client = self._client_factory()
+        client = client_provider() if client_provider else self._client_factory()
         messages = _persona_messages(run_input, persona)
         response_format = {
             "type": "json_schema",

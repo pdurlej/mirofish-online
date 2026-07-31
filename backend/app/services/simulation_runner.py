@@ -7,21 +7,20 @@ import os
 import sys
 import json
 import time
-import asyncio
 import threading
 import subprocess
 import signal
 import atexit
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from queue import Queue
 
-from ..config import Config
+from ..storage import GraphStorage
 from ..utils.logger import get_logger
 from .graph_memory_updater import GraphMemoryManager
-from .simulation_ipc import SimulationIPCClient, CommandType, IPCResponse
+from .simulation_ipc import SimulationIPCClient
 
 logger = get_logger('mirofish.simulation_runner')
 
@@ -225,6 +224,22 @@ class SimulationRunner:
     
     # Graph memory update configuration
     _graph_memory_enabled: Dict[str, bool] = {}  # simulation_id -> enabled
+
+    @classmethod
+    def active_work(cls) -> Dict[str, int]:
+        """Return count-only process and monitor state for safe draining."""
+        return {
+            "processes": sum(
+                process.poll() is None for process in list(cls._processes.values())
+            ),
+            "monitors": sum(
+                thread.is_alive()
+                for thread in list(cls._monitor_threads.values())
+            ),
+            "queued_actions": sum(
+                queue.qsize() for queue in list(cls._action_queues.values())
+            ),
+        }
     
     @classmethod
     def get_run_state(cls, simulation_id: str) -> Optional[SimulationRunState]:
@@ -341,7 +356,7 @@ class SimulationRunner:
         config_path = os.path.join(sim_dir, "simulation_config.json")
         
         if not os.path.exists(config_path):
-            raise ValueError(f"Simulation config does not exist, call /prepare endpoint first")
+            raise ValueError("Simulation config does not exist, call /prepare endpoint first")
         
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
@@ -1120,8 +1135,6 @@ class SimulationRunner:
         Returns:
             Cleanup result information
         """
-        import shutil
-        
         sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
         
         if not os.path.exists(sim_dir):
@@ -1763,4 +1776,3 @@ class SimulationRunner:
             results = results[:limit]
         
         return results
-

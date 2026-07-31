@@ -4,16 +4,50 @@ MiroFish Backend - Flask Application Factory
 
 import os
 import warnings
+from pathlib import Path
 
 # Suppress multiprocessing resource_tracker warnings (from third-party libraries like transformers)
 # Must be set before all other imports
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
-from flask import Flask, request
-from flask_cors import CORS
+from flask import Flask, abort, request, send_from_directory  # noqa: E402
+from flask_cors import CORS  # noqa: E402
+from werkzeug.exceptions import NotFound  # noqa: E402
 
-from .config import Config
-from .utils.logger import setup_logger, get_logger
+from .config import Config  # noqa: E402
+from .lifecycle import (  # noqa: E402
+    LifecycleState,
+    register_default_work_providers,
+    register_lifecycle,
+)
+from .utils.logger import get_logger, setup_logger  # noqa: E402
+
+
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+BACKEND_ROUTE_PREFIXES = frozenset({"api", "health", "internal"})
+
+
+def register_frontend_routes(app: Flask) -> None:
+    """Serve the production SPA without masking missing backend routes."""
+
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def frontend(path: str):
+        first_segment = path.partition("/")[0]
+        if first_segment in BACKEND_ROUTE_PREFIXES:
+            abort(404)
+
+        if path:
+            try:
+                return send_from_directory(FRONTEND_DIST, path)
+            except NotFound:
+                if first_segment == "assets" or Path(path).suffix:
+                    abort(404)
+
+        index = FRONTEND_DIST / "index.html"
+        if not index.is_file():
+            abort(404)
+        return send_from_directory(FRONTEND_DIST, "index.html")
 
 
 def create_app(config_class=Config):
@@ -54,6 +88,15 @@ def create_app(config_class=Config):
         # Store None so endpoints can return 503 gracefully
         app.extensions['neo4j_storage'] = None
 
+    from .storage.embedding_service import EmbeddingService
+    app.extensions['embedding_service'] = EmbeddingService(max_retries=1, timeout=3)
+
+    lifecycle = LifecycleState(
+        start_drained=bool(app.config.get("MIROFISH_START_DRAINED", False))
+    )
+    register_default_work_providers(lifecycle)
+    register_lifecycle(app, lifecycle)
+
     # Register simulation process cleanup function (ensure all simulation processes terminate on server shutdown)
     from .services.simulation_runner import SimulationRunner
     SimulationRunner.register_cleanup()
@@ -85,16 +128,12 @@ def create_app(config_class=Config):
         return response
 
     # Register blueprints
-    from .api import graph_bp, simulation_bp, report_bp, audience_bp
+    from .api import audience_bp, graph_bp, report_bp, simulation_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
     app.register_blueprint(audience_bp, url_prefix='/api/audience')
-
-    # Health check
-    @app.route('/health')
-    def health():
-        return {'status': 'ok', 'service': 'MiroFish-Offline Backend'}
+    register_frontend_routes(app)
 
     if should_log_startup:
         logger.info("MiroFish-Offline Backend startup complete")

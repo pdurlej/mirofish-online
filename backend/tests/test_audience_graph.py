@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from app.audience import (
     AudienceLiveRunner,
     InMemoryAudienceGraphStore,
     ModelRouter,
+    Neo4jAudienceGraphStore,
     build_fake_audience_run,
     load_default_personas,
 )
@@ -28,7 +30,10 @@ from app.audience.live_runner import (
     _reasoning_effort_for_model,
 )
 from app.audience.channel_fit import build_channel_scores, top_channel
-from app.audience.graph_store import _graph_snapshot_from_rows, _neo4j_history_summary
+from app.audience.graph_store import (
+    _graph_snapshot_from_rows,
+    _neo4j_history_summary,
+)
 from app.audience.reclustering import build_recluster_plan, summarize_recluster_plan
 from app.audience.research_snapshot import SyntheticResearchDataset, build_snapshot_run
 from app.audience.similarity import (
@@ -854,6 +859,99 @@ def test_in_memory_graph_uses_latest_run_for_each_unique_topic():
     assert graph["stats"]["topic_count"] == 1
 
 
+def test_in_memory_graph_evicts_oldest_full_run_payload():
+    store = InMemoryAudienceGraphStore(max_runs=2)
+    runs = [
+        build_fake_audience_run(
+            AudienceRunInput(topic=f"Bounded fallback topic {index}", run_seed=str(index))
+        )
+        for index in range(3)
+    ]
+
+    for run in runs:
+        store.write_run(run)
+
+    assert store.read_run(runs[0].run_id) is None
+    assert store.read_run(runs[1].run_id) is not None
+    assert store.read_run(runs[2].run_id) is not None
+    assert len(store._runs) == 2  # noqa: SLF001
+
+
+def test_neo4j_previous_topics_reads_compact_reviewer_memory_projection():
+    captured: dict[str, object] = {}
+    records = [
+        {
+            "id": "topic-previous",
+            "topic_hash": "previous-hash",
+            "summary": "AI eval quality gates",
+            "title": "Reliable AI evals",
+            "channel": "blog",
+            "cluster_id": "cluster-ai",
+            "cluster_label": "AI quality",
+            "cluster_version": 2,
+            "created_at": "2026-07-31T12:00:00+00:00",
+            "reactions": [
+                {"persona_id": "persona-01", "summary": "Useful launch gate."},
+                {"persona_id": None, "summary": None},
+            ],
+            "objections": [
+                {"persona_id": "persona-01", "text": "Define the failure budget."}
+            ],
+        }
+    ]
+
+    class FakeTransaction:
+        def run(self, query, **parameters):  # noqa: ANN001
+            captured["query"] = query
+            captured["parameters"] = parameters
+            return records
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute_read(self, callback):  # noqa: ANN001
+            return callback(FakeTransaction())
+
+    class FakeDriver:
+        def session(self):
+            return FakeSession()
+
+    class FakeStorage:
+        _driver = FakeDriver()
+
+        @staticmethod
+        def _call_with_retry(callback, *args):  # noqa: ANN001
+            return callback(*args)
+
+    previous = Neo4jAudienceGraphStore(FakeStorage()).previous_topics(limit=7)
+
+    assert "payload_json" not in str(captured["query"])
+    assert captured["parameters"] == {"limit": 7}
+    assert previous == [
+        {
+            "id": "topic-previous",
+            "topic_hash": "previous-hash",
+            "summary": "AI eval quality gates",
+            "title": "Reliable AI evals",
+            "channel": "blog",
+            "cluster_id": "cluster-ai",
+            "cluster_label": "AI quality",
+            "cluster_version": 2,
+            "created_at": "2026-07-31T12:00:00+00:00",
+            "reactions": [
+                {"persona_id": "persona-01", "summary": "Useful launch gate."}
+            ],
+            "objections": [
+                {"persona_id": "persona-01", "text": "Define the failure budget."}
+            ],
+        }
+    ]
+
+
 def test_graph_snapshot_deduplicates_rows_counts_and_prefers_v2_edges():
     topic_rows = [
         {
@@ -1088,6 +1186,82 @@ class FakeLLMClient:
             latency_ms=123,
             finish_reason="stop",
         )
+
+
+def test_live_audience_runner_reuses_and_closes_one_http_client_per_run():
+    clients = []
+
+    class CountingClient(FakeLLMClient):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+            self.close_calls = 0
+
+        def chat_with_metadata(self, **kwargs):
+            self.calls += 1
+            return super().chat_with_metadata(**kwargs)
+
+        def close(self):
+            self.close_calls += 1
+
+    def client_factory():
+        client = CountingClient()
+        clients.append(client)
+        return client
+
+    result = AudienceLiveRunner(client_factory=client_factory).run(
+        AudienceRunInput(topic="AI quality gates for product launches", run_seed="pool")
+    )
+
+    assert len(result.reactions) == 20
+    assert len(clients) == 1
+    assert clients[0].calls == 20
+    assert clients[0].close_calls == 1
+
+
+def test_live_audience_runner_closes_shared_client_after_timed_out_calls_finish():
+    closed = threading.Event()
+    allow_finish = threading.Event()
+    close_while_active: list[bool] = []
+
+    class SlowClient(FakeLLMClient):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.lock = threading.Lock()
+
+        def chat_with_metadata(self, **kwargs):
+            with self.lock:
+                self.active += 1
+            try:
+                allow_finish.wait(timeout=1)
+                return super().chat_with_metadata(**kwargs)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+        def close(self):
+            with self.lock:
+                close_while_active.append(self.active > 0)
+            closed.set()
+
+    client = SlowClient()
+    runner = AudienceLiveRunner(
+        client_factory=lambda: client,
+        failure_threshold=1.0,
+        run_timeout_seconds=0.01,
+        max_workers=2,
+    )
+    result = runner.run(
+        AudienceRunInput(topic="Bounded timeout cleanup", run_seed="pool-timeout"),
+        personas=load_default_personas()[:2],
+    )
+
+    assert result.receipt["run_timed_out"] is True
+    assert not closed.is_set()
+    allow_finish.set()
+    assert closed.wait(timeout=1)
+    assert close_while_active == [False]
 
 
 def test_live_audience_runner_records_usage_and_receipt():
@@ -1587,7 +1761,15 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
     slow_persona_id = personas[1].id
 
     class SlowOneRunner(AudienceLiveRunner):
-        def _call_persona(self, run_input, persona, model):  # noqa: ANN001
+        def _call_persona(  # noqa: ANN001
+            self,
+            run_input,
+            persona,
+            model,
+            *,
+            high_quality_retry=False,  # noqa: ARG002
+            client_provider=None,  # noqa: ARG002
+        ):
             if persona.id == slow_persona_id:
                 time.sleep(0.3)
             return PersonaCallResult(

@@ -5,12 +5,16 @@ services:
     build:
       context: ../..
     container_name: mirofish-online
+    mem_limit: 2g
     env_file:
       - path: ../../.env
         required: false
+    environment:
+      - MIROFISH_START_DRAINED=true
+      - FLASK_PORT=3000
     ports:
       - "127.0.0.1:${MIROFISH_UI_PORT:-13000}:3000"
-      - "127.0.0.1:${MIROFISH_API_PORT:-15001}:5001"
+      - "127.0.0.1:${MIROFISH_API_PORT:-15001}:3000"
     labels:
       - "traefik.enable=${MIROFISH_TRAEFIK_ENABLE:-false}"
       - "traefik.docker.network=${PLATFORM_PROXY_NETWORK:-hp_proxy}"
@@ -27,7 +31,18 @@ services:
       neo4j:
         condition: service_healthy
       embedding-ollama:
-        condition: service_started
+        condition: service_healthy
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health/live', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - mirofish-private
       - platform-proxy
@@ -49,6 +64,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     restart: unless-stopped
+    stop_grace_period: 120s
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
@@ -61,11 +77,18 @@ services:
   embedding-ollama:
     image: ollama/ollama:latest
     container_name: mirofish-online-embedding-ollama
+    mem_limit: 1536m
     ports:
       - "127.0.0.1:11435:11434"
     volumes:
       - embedding_ollama_data:/root/.ollama
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     networks:
       - mirofish-private
 

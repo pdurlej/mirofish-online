@@ -40,6 +40,19 @@ class FakeChat:
 class FakeOpenAIClient:
     def __init__(self):
         self.chat = FakeChat()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_close_releases_underlying_http_client():
+    client = object.__new__(LLMClient)
+    client.client = FakeOpenAIClient()
+
+    client.close()
+
+    assert client.client.closed is True
 
 
 def test_chat_with_metadata_returns_usage_and_sanitized_content():

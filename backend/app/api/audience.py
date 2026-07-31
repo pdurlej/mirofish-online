@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from flask import current_app, jsonify, request
 
-from ..config import Config
-from . import audience_bp
 from ..audience import (
     AudienceLiveRunner,
     AudienceRunInput,
@@ -15,8 +13,9 @@ from ..audience import (
     build_fake_audience_run,
     load_default_personas,
 )
+from ..config import Config
 from ..storage.embedding_service import EmbeddingService
-
+from . import audience_bp
 
 _STORE = InMemoryAudienceGraphStore()
 _RUN_MANAGER = AudienceRunManager(
@@ -26,8 +25,14 @@ _RUN_MANAGER = AudienceRunManager(
         run_timeout_seconds=Config.MIROFISH_AUDIENCE_RUN_TIMEOUT_SECONDS,
         max_workers=min(Config.MIROFISH_AUDIENCE_MAX_WORKERS, 6),
         embedding_service_factory=_audience_embedding_service,
-    )
+    ),
+    max_terminal_records=Config.MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS,
 )
+
+
+def audience_active_work() -> dict[str, int]:
+    """Expose sanitized in-process work counts to the lifecycle coordinator."""
+    return _RUN_MANAGER.active_work()
 
 
 def _get_store():
