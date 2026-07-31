@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -1187,6 +1188,82 @@ class FakeLLMClient:
         )
 
 
+def test_live_audience_runner_reuses_and_closes_one_http_client_per_run():
+    clients = []
+
+    class CountingClient(FakeLLMClient):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+            self.close_calls = 0
+
+        def chat_with_metadata(self, **kwargs):
+            self.calls += 1
+            return super().chat_with_metadata(**kwargs)
+
+        def close(self):
+            self.close_calls += 1
+
+    def client_factory():
+        client = CountingClient()
+        clients.append(client)
+        return client
+
+    result = AudienceLiveRunner(client_factory=client_factory).run(
+        AudienceRunInput(topic="AI quality gates for product launches", run_seed="pool")
+    )
+
+    assert len(result.reactions) == 20
+    assert len(clients) == 1
+    assert clients[0].calls == 20
+    assert clients[0].close_calls == 1
+
+
+def test_live_audience_runner_closes_shared_client_after_timed_out_calls_finish():
+    closed = threading.Event()
+    allow_finish = threading.Event()
+    close_while_active: list[bool] = []
+
+    class SlowClient(FakeLLMClient):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.lock = threading.Lock()
+
+        def chat_with_metadata(self, **kwargs):
+            with self.lock:
+                self.active += 1
+            try:
+                allow_finish.wait(timeout=1)
+                return super().chat_with_metadata(**kwargs)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+        def close(self):
+            with self.lock:
+                close_while_active.append(self.active > 0)
+            closed.set()
+
+    client = SlowClient()
+    runner = AudienceLiveRunner(
+        client_factory=lambda: client,
+        failure_threshold=1.0,
+        run_timeout_seconds=0.01,
+        max_workers=2,
+    )
+    result = runner.run(
+        AudienceRunInput(topic="Bounded timeout cleanup", run_seed="pool-timeout"),
+        personas=load_default_personas()[:2],
+    )
+
+    assert result.receipt["run_timed_out"] is True
+    assert not closed.is_set()
+    allow_finish.set()
+    assert closed.wait(timeout=1)
+    assert close_while_active == [False]
+
+
 def test_live_audience_runner_records_usage_and_receipt():
     runner = AudienceLiveRunner(client_factory=FakeLLMClient)
     result = runner.run(
@@ -1684,7 +1761,15 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
     slow_persona_id = personas[1].id
 
     class SlowOneRunner(AudienceLiveRunner):
-        def _call_persona(self, run_input, persona, model):  # noqa: ANN001
+        def _call_persona(  # noqa: ANN001
+            self,
+            run_input,
+            persona,
+            model,
+            *,
+            high_quality_retry=False,  # noqa: ARG002
+            client_provider=None,  # noqa: ARG002
+        ):
             if persona.id == slow_persona_id:
                 time.sleep(0.3)
             return PersonaCallResult(

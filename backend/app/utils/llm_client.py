@@ -51,6 +51,10 @@ class LLMClient:
         # Read from env OLLAMA_NUM_CTX, default 8192 (Ollama default is only 2048).
         self._num_ctx = int(os.environ.get('OLLAMA_NUM_CTX', '8192'))
 
+    def close(self) -> None:
+        """Release the underlying HTTP connection pool."""
+        self.client.close()
+
     def _is_ollama(self) -> bool:
         """Check if we're talking to an Ollama server."""
         return '11434' in (self.base_url or '')
