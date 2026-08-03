@@ -11,10 +11,9 @@ Features:
 
 import os
 import json
-import time
 import re
 from typing import Dict, Any, List, Optional, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -22,11 +21,7 @@ from ..config import Config
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
 from .graph_tools import (
-    GraphToolsService,
-    SearchResult,
-    InsightForgeResult,
-    PanoramaResult,
-    InterviewResult
+    GraphToolsService
 )
 
 logger = get_logger('mirofish.report_agent')
@@ -1519,8 +1514,8 @@ class ReportAgent:
 
         # Check forceconclusion when LLM return is None
         if response is None:
-            final_answer = f"(This section generation failed: LLM returned empty response, please retry later)"
-            final_answer = f"(ThisSectiongeneratefailed: LLM returnedemptyresponse, pleaselaterretry)"
+            final_answer = "(This section generation failed: LLM returned empty response, please retry later)"
+            final_answer = "(ThisSectiongeneratefailed: LLM returnedemptyresponse, pleaselaterretry)"
         elif "Final Answer:" in response:
             final_answer = response.split("Final Answer:")[-1].strip()
         else:
@@ -2167,7 +2162,6 @@ class ReportManager:
             heading_match = re.match(r'^(#{1,6})\s+(.+)$', stripped)
             
             if heading_match:
-                level = len(heading_match.group(1))
                 title_text = heading_match.group(2).strip()
                 
                 # Checkwhether isandSection Titleduplicatetitle（skip first5rowwithinduplicate）
@@ -2281,12 +2275,11 @@ class ReportManager:
         
         fromsaveSectionfileassembleComplete report，and processrowtitleclean
         """
-        folder = cls._get_report_folder(report_id)
         
         # BuildReportheader
         md_content = f"# {outline.title}\n\n"
         md_content += f"> {outline.summary}\n\n"
-        md_content += f"---\n\n"
+        md_content += "---\n\n"
         
         # sequentiallyReadallSectionfile
         sections = cls.get_generated_sections(report_id)

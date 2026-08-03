@@ -6,7 +6,7 @@ Scoring: 0.7 * vector_score + 0.3 * keyword_score (BM25 via fulltext index).
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from neo4j import Session as Neo4jSession
 

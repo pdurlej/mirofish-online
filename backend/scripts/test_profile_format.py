@@ -81,7 +81,7 @@ def test_profile_formats():
         print(f"   File: {twitter_path}")
         print(f"   Lines: {len(rows)}")
         print(f"   Headers: {list(rows[0].keys())}")
-        print(f"\n   Sample data (Row 1):")
+        print("\n   Sample data (Row 1):")
         for key, value in rows[0].items():
             print(f"     {key}: {value}")
         
@@ -92,7 +92,7 @@ def test_profile_formats():
         if missing:
             print(f"\n   [Error] Missing fields: {missing}")
         else:
-            print(f"\n   [Pass] All required fields exist")
+            print("\n   [Pass] All required fields exist")
         
         # Test Reddit JSON format
         print("\n2. testReddit Profile (detailed JSON format)")
@@ -106,7 +106,7 @@ def test_profile_formats():
         print(f"   File: {reddit_path}")
         print(f"   Number of entries: {len(reddit_data)}")
         print(f"   Fields: {list(reddit_data[0].keys())}")
-        print(f"\n   Sample data (Item 1):")
+        print("\n   Sample data (Item 1):")
         print(json.dumps(reddit_data[0], ensure_ascii=False, indent=4))
         
         # Verify detailed format fields
@@ -117,7 +117,7 @@ def test_profile_formats():
         if missing:
             print(f"\n   [Error] Missing required fields: {missing}")
         else:
-            print(f"\n   [Pass] All required fields exist")
+            print("\n   [Pass] All required fields exist")
         
         present_optional = set(optional_reddit_fields) & set(reddit_data[0].keys())
         print(f"   [Info] Optional fields: {present_optional}")

@@ -10,7 +10,7 @@ import shutil
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from enum import Enum
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from ..config import Config
 
 

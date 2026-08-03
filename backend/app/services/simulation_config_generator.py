@@ -432,7 +432,6 @@ class SimulationConfigGenerator:
     
     def _call_llm_with_retry(self, prompt: str, system_prompt: str) -> Dict[str, Any]:
         """LLM call with retry, including JSON repair logic"""
-        import re
 
         max_attempts = 3
         last_error = None
@@ -520,13 +519,13 @@ class SimulationConfigGenerator:
 
             try:
                 return json.loads(json_str)
-            except:
+            except (TypeError, ValueError):
                 # Try removing all control characters
                 json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
                 json_str = re.sub(r'\s+', ' ', json_str)
                 try:
                     return json.loads(json_str)
-                except:
+                except (TypeError, ValueError):
                     pass
 
         return None
@@ -648,11 +647,6 @@ Field description:
         entities: List[EntityNode]
     ) -> Dict[str, Any]:
         """Generate event configuration"""
-
-        # Get available entity types list for LLM reference
-        entity_types_available = list(set(
-            e.get_entity_type() or "Unknown" for e in entities
-        ))
 
         # List representative entity names for each type
         type_examples = {}

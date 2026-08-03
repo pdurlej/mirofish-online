@@ -4,7 +4,6 @@ Uses project context mechanism with server-side state persistence
 """
 
 import os
-import traceback
 import threading
 from flask import request, jsonify, current_app
 
@@ -255,10 +254,10 @@ def generate_ontology():
         })
         
     except Exception as e:
+        logger.exception("Ontology generation failed: %s", e)
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": traceback.format_exc()
         }), 500
 
 
@@ -432,7 +431,7 @@ def build_graph():
                     progress=15
                 )
 
-                episode_uuids = builder.add_text_batches(
+                builder.add_text_batches(
                     graph_id,
                     chunks,
                     batch_size=3,
@@ -479,18 +478,19 @@ def build_graph():
 
             except Exception as e:
                 # Update project status to failed
-                build_logger.error(f"[{task_id}] Graph build failed: {str(e)}")
-                build_logger.debug(traceback.format_exc())
+                build_logger.exception(f"[{task_id}] Graph build failed: {str(e)}")
 
                 project.status = ProjectStatus.FAILED
                 project.error = str(e)
                 ProjectManager.save_project(project)
 
+                # The task record is readable through /task/<task_id>; keep the
+                # stack trace in the log and expose only the message.
                 task_manager.update_task(
                     task_id,
                     status=TaskStatus.FAILED,
                     message=f"Build failed: {str(e)}",
-                    error=traceback.format_exc()
+                    error=str(e)
                 )
 
         # Start background thread
@@ -507,10 +507,10 @@ def build_graph():
         })
         
     except Exception as e:
+        logger.exception("Graph build request failed: %s", e)
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": traceback.format_exc()
         }), 500
 
 
@@ -567,10 +567,10 @@ def get_graph_data(graph_id: str):
         })
 
     except Exception as e:
+        logger.exception("Failed to load graph data: %s", e)
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": traceback.format_exc()
         }), 500
 
 
@@ -590,8 +590,8 @@ def delete_graph(graph_id: str):
         })
 
     except Exception as e:
+        logger.exception("Failed to delete graph: %s", e)
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": traceback.format_exc()
         }), 500

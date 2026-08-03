@@ -10,7 +10,6 @@ Optimization improvements:
 
 import json
 import random
-import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -299,7 +298,7 @@ class OasisProfileGenerator:
         }
 
         if not self.graph_id:
-            logger.debug(f"Skip knowledge graph search: graph_id not set")
+            logger.debug("Skip knowledge graph search: graph_id not set")
             return results
 
         comprehensive_query = f"All information, activities, events, relationships and background about {entity_name}"
@@ -405,7 +404,7 @@ class OasisProfileGenerator:
                 node_summary = node.get("summary", "")
 
                 # Filter out default labels
-                custom_labels = [l for l in node_labels if l not in ["Entity", "Node"]]
+                custom_labels = [label for label in node_labels if label not in ["Entity", "Node"]]
                 label_str = f" ({', '.join(custom_labels)})" if custom_labels else ""
 
                 if node_summary:
@@ -526,7 +525,6 @@ class OasisProfileGenerator:
     
     def _fix_truncated_json(self, content: str) -> str:
         """Fix truncated JSON (output truncated by max_tokens limit)"""
-        import re
 
         # If JSON is truncated, try to close it
         content = content.strip()
@@ -577,7 +575,7 @@ class OasisProfileGenerator:
                 result = json.loads(json_str)
                 result["_fixed"] = True
                 return result
-            except json.JSONDecodeError as e:
+            except json.JSONDecodeError:
                 # 5. If still failed, try more aggressive fix
                 try:
                     # Remove all control characters
@@ -587,7 +585,7 @@ class OasisProfileGenerator:
                     result = json.loads(json_str)
                     result["_fixed"] = True
                     return result
-                except:
+                except (TypeError, ValueError):
                     pass
 
         # 6. Try to extract partial information from content
@@ -599,7 +597,7 @@ class OasisProfileGenerator:
 
         # If extracted meaningful content, mark as fixed
         if bio_match or persona_match:
-            logger.info(f"Extracted partial information from corrupted JSON")
+            logger.info("Extracted partial information from corrupted JSON")
             return {
                 "bio": bio,
                 "persona": persona,
@@ -607,7 +605,7 @@ class OasisProfileGenerator:
             }
 
         # 7. Complete failure, return basic structure
-        logger.warning(f"JSON fix failed, returning basic structure")
+        logger.warning("JSON fix failed, returning basic structure")
         return {
             "bio": entity_summary[:200] if entity_summary else f"{entity_type}: {entity_name}",
             "persona": entity_summary or f"{entity_name} is a {entity_type}."
@@ -741,7 +739,7 @@ Important:
 
         elif entity_type_lower in ["publicfigure", "expert", "faculty"]:
             return {
-                "bio": f"Expert and thought leader in their field.",
+                "bio": "Expert and thought leader in their field.",
                 "persona": f"{entity_name} is a recognized {entity_type.lower()} who shares insights and opinions on important matters. They are known for their expertise and influence in public discourse.",
                 "age": random.randint(35, 60),
                 "gender": random.choice(["male", "female"]),
@@ -884,7 +882,7 @@ Important:
                     user_name=self._generate_username(entity.name),
                     name=entity.name,
                     bio=f"{entity_type}: {entity.name}",
-                    persona=entity.summary or f"A participant in social discussions.",
+                    persona=entity.summary or "A participant in social discussions.",
                     source_entity_uuid=entity.uuid,
                     source_entity_type=entity_type,
                 )
@@ -965,14 +963,14 @@ Important:
             f"[Generated] {entity_name} ({entity_type})",
             f"{separator}",
             f"Username: {profile.user_name}",
-            f"",
-            f"[Bio]",
+            "",
+            "[Bio]",
             f"{profile.bio}",
-            f"",
-            f"[Detailed Persona]",
+            "",
+            "[Detailed Persona]",
             f"{profile.persona}",
-            f"",
-            f"[Basic Attributes]",
+            "",
+            "[Basic Attributes]",
             f"Age: {profile.age} | Gender: {profile.gender} | MBTI: {profile.mbti}",
             f"Profession: {profile.profession} | Country: {profile.country}",
             f"Interested Topics: {topics_str}",

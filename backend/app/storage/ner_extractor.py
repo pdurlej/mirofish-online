@@ -7,7 +7,7 @@ entities and relations from text chunks, guided by the graph's ontology.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from ..utils.llm_client import LLMClient
 

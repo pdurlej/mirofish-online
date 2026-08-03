@@ -37,9 +37,16 @@ def main():
     app = create_app()
 
     # Get runtime configuration
-    host = os.environ.get('FLASK_HOST', '0.0.0.0')
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
     port = int(os.environ.get('FLASK_PORT', 5001))
     debug = Config.DEBUG
+
+    if debug and host not in ('127.0.0.1', 'localhost', '::1'):
+        print(
+            f"WARNING: FLASK_DEBUG is on while binding {host}. The Werkzeug "
+            "debugger executes code from the browser; keep this off any "
+            "network you do not control."
+        )
 
     # Start service
     app.run(host=host, port=port, debug=debug, threaded=True)
