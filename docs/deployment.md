@@ -28,7 +28,9 @@ Use your deployment platform's secret store for credentials. Do not bake `.env` 
 
 The repository includes a Compose smoke profile used to verify the application stack. Treat it as a reference:
 
-- adjust CPU/GPU configuration to match the host;
+- adjust CPU/GPU configuration to match the host — `docker-compose.yml` runs
+  Ollama on CPU, and `docker-compose.gpu.yml` is an opt-in override that adds an
+  NVIDIA device reservation (it requires the NVIDIA Container Toolkit);
 - replace example credentials;
 - review every published port;
 - provide your own ingress and authentication policy;

@@ -1,0 +1,17 @@
+# NVIDIA acceleration for the bundled Ollama service.
+#
+# Requires the NVIDIA Container Toolkit on the host. Without it, the device
+# reservation below makes the whole stack fail to start, which is why it lives
+# in an override instead of docker-compose.yml.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

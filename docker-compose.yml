@@ -1,14 +1,15 @@
 services:
   mirofish:
     build: .
-    # Or use pre-built image (when available):
-    # image: ghcr.io/nikmcfly/mirofish-offline:latest
+    # Or use a pre-built image published by .github/workflows/docker-image.yml:
+    # image: ghcr.io/pdurlej/mirofish:latest
     container_name: mirofish-offline
     env_file:
       - .env
+    # Gunicorn serves the API and the built SPA from a single port; 5001 only
+    # exists for the local `npm run dev` Flask server.
     ports:
       - "3000:3000"
-      - "5001:5001"
     restart: unless-stopped
     volumes:
       - ./backend/uploads:/app/backend/uploads
@@ -21,9 +22,11 @@ services:
   neo4j:
     image: neo4j:5.18-community
     container_name: mirofish-neo4j
+    # The app reaches Neo4j over the compose network, so these are published
+    # for operator access only and stay on loopback.
     ports:
-      - "7474:7474"   # Neo4j Browser
-      - "7687:7687"   # Bolt protocol
+      - "127.0.0.1:7474:7474"   # Neo4j Browser
+      - "127.0.0.1:7687:7687"   # Bolt protocol
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mirofish}
       - NEO4J_PLUGINS=["apoc"]
@@ -43,18 +46,15 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: mirofish-ollama
+    # Unauthenticated inference endpoint — never publish it beyond loopback.
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # Runs on CPU by default so this file starts on any host. For NVIDIA
+    # acceleration, add the GPU override:
+    #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 
 volumes:
   neo4j_data:
