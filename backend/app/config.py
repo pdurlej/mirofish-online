@@ -23,7 +23,9 @@ class Config:
 
     # Flask configuration
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
-    DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
+    # Debug is opt-in: the dev server binds every interface by default, and the
+    # Werkzeug debugger would otherwise be reachable from the local network.
+    DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     MIROFISH_START_DRAINED = (
         os.environ.get('MIROFISH_START_DRAINED', 'false').lower() == 'true'
     )
