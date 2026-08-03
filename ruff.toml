@@ -1,0 +1,23 @@
+# Shared ruff settings for the backend package, helper scripts, and tests.
+# `scripts/ruff_changed.py` runs ruff against changed files in CI; keeping the
+# configuration here (rather than relying on ruff defaults) makes that gate
+# reproducible and lets the ignores below carry an explanation.
+
+target-version = "py311"
+line-length = 120
+
+exclude = [
+    ".venv",
+    "frontend",
+]
+
+[lint]
+# Pyflakes plus the pycodestyle errors that flag real defects rather than style.
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# These simulation entrypoints extend sys.path and load .env before they can
+# import the app package, so their imports cannot all sit at the top.
+"backend/scripts/run_parallel_simulation.py" = ["E402"]
+"backend/scripts/run_reddit_simulation.py" = ["E402"]
+"backend/scripts/run_twitter_simulation.py" = ["E402"]

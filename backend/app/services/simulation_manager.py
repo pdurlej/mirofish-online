@@ -6,17 +6,18 @@ Use preset scripts + LLM intelligent generation of config parameters
 
 import os
 import json
-import shutil
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from ..config import Config
 from ..utils.logger import get_logger
-from .entity_reader import EntityReader, FilteredEntities
-from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
-from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
+from .entity_reader import EntityReader
+from .oasis_profile_generator import OasisProfileGenerator
+from .simulation_config_generator import SimulationConfigGenerator
+
+if TYPE_CHECKING:
+    from ..storage.graph_storage import GraphStorage
 
 logger = get_logger('mirofish.simulation')
 
