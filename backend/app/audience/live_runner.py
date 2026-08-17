@@ -7,6 +7,8 @@ import re
 import threading
 import time
 import uuid
+from collections import Counter
+from collections.abc import Iterable
 from concurrent.futures import (
     Future,
     ThreadPoolExecutor,
@@ -68,6 +70,12 @@ REACTION_SCHEMA: dict[str, Any] = {
     },
 }
 
+# Derived from the schema rather than restated, so the two cannot drift apart.
+STANCE_VALUES: frozenset[str] = frozenset(REACTION_SCHEMA["properties"]["stance"]["enum"])
+SEVERITY_VALUES: frozenset[str] = frozenset(
+    REACTION_SCHEMA["properties"]["objection_severity"]["enum"]
+)
+
 
 class AudienceRunFailed(RuntimeError):
     """Raised when a live run crosses the controlled-failure threshold."""
@@ -123,6 +131,11 @@ class PersonaCallResult:
     schema_fallback_used: bool
     attempts: tuple[PersonaAttempt, ...] = ()
     high_quality_retry_used: bool = False
+    # Loose normalization rewrites the whole reaction, so a run can look clean
+    # while every stance was invented by the fallback. Carry that to the receipt.
+    loose_normalized: bool = False
+    stance_unrecognized: bool = False
+    severity_unrecognized: bool = False
 
 
 class _RunClient:
@@ -240,6 +253,11 @@ class AudienceLiveRunner:
                     parsed = call.parsed
                     _record_attempts(receipt, call.attempts)
                     receipt["schema_fallback_count"] += int(call.schema_fallback_used)
+                    receipt["loose_normalization_count"] += int(call.loose_normalized)
+                    receipt["unrecognized_stance_count"] += int(call.stance_unrecognized)
+                    receipt["unrecognized_severity_count"] += int(
+                        call.severity_unrecognized
+                    )
                     receipt["high_quality_retry_count"] += int(call.high_quality_retry_used)
                     receipt["high_quality_retry_success_count"] += int(
                         call.high_quality_retry_used
@@ -328,6 +346,12 @@ class AudienceLiveRunner:
         receipt["failed_persona_count"] = len(failures)
         receipt["failure_rate"] = round(len(failures) / len(active_personas), 3)
         receipt["reliability_grade"] = _reliability_grade(receipt["failure_rate"])
+        receipt["stance_distribution"] = _value_distribution(
+            reaction["stance"] for reaction in reactions
+        )
+        receipt["severity_distribution"] = _value_distribution(
+            objection["severity"] for objection in objections
+        )
         _apply_batch_quality_audit(
             receipt,
             objections,
@@ -477,6 +501,7 @@ class AudienceLiveRunner:
                 "schema": REACTION_SCHEMA,
             },
         }
+        strict_normalization: dict[str, bool] = {}
         try:
             result = client.chat_with_metadata(
                 messages=messages,
@@ -487,7 +512,9 @@ class AudienceLiveRunner:
                 reasoning_effort=_reasoning_effort_for_model(model),
             )
             try:
-                parsed = _parse_and_validate(result.content)
+                parsed = _parse_and_validate(
+                    result.content, normalization=strict_normalization
+                )
                 _validate_reaction_quality(parsed)
             except Exception as exc:  # noqa: BLE001
                 error_kind = _sanitized_error_kind(exc)
@@ -506,7 +533,19 @@ class AudienceLiveRunner:
                 error_kind=None,
                 high_quality_retry=high_quality_retry,
             )
-            return PersonaCallResult(parsed, result, False, (attempt,))
+            return PersonaCallResult(
+                parsed,
+                result,
+                False,
+                (attempt,),
+                loose_normalized=strict_normalization.get("loose", False),
+                stance_unrecognized=strict_normalization.get(
+                    "stance_unrecognized", False
+                ),
+                severity_unrecognized=strict_normalization.get(
+                    "severity_unrecognized", False
+                ),
+            )
         except Exception as exc:
             if isinstance(exc, PersonaCallFailed):
                 if not _looks_like_schema_retry(exc):
@@ -546,8 +585,13 @@ class AudienceLiveRunner:
             model=model,
             reasoning_effort=_reasoning_effort_for_model(model),
         )
+        # A fresh dict: the strict attempt's normalization describes a response
+        # that was thrown away, so reusing it would report stale coercions.
+        repair_normalization: dict[str, bool] = {}
         try:
-            parsed = _parse_and_validate(result.content)
+            parsed = _parse_and_validate(
+                result.content, normalization=repair_normalization
+            )
             _validate_reaction_quality(parsed)
         except Exception as exc:  # noqa: BLE001
             error_kind = _sanitized_error_kind(exc)
@@ -568,7 +612,17 @@ class AudienceLiveRunner:
             schema_fallback=True,
             high_quality_retry=high_quality_retry,
         )
-        return PersonaCallResult(parsed, result, True, (*attempts, attempt))
+        return PersonaCallResult(
+            parsed,
+            result,
+            True,
+            (*attempts, attempt),
+            loose_normalized=repair_normalization.get("loose", False),
+            stance_unrecognized=repair_normalization.get("stance_unrecognized", False),
+            severity_unrecognized=repair_normalization.get(
+                "severity_unrecognized", False
+            ),
+        )
 
 
 def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
@@ -613,7 +667,15 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
     ]
 
 
-def _parse_and_validate(content: str) -> dict[str, Any]:
+def _parse_and_validate(
+    content: str, *, normalization: dict[str, bool] | None = None
+) -> dict[str, Any]:
+    """Parse a persona reaction, optionally reporting what had to be rewritten.
+
+    ``normalization`` is an out-parameter rather than a changed return type so
+    existing callers and tests keep working. It matters because the loose path
+    silently substitutes values, and until now nothing counted how often.
+    """
     cleaned = content.strip()
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\n?```\s*$", "", cleaned).strip()
@@ -629,12 +691,30 @@ def _parse_and_validate(content: str) -> dict[str, Any]:
             raise ValueError("invalid_json") from raw_exc
     error = validate_json_schema(parsed, REACTION_SCHEMA)
     if error:
+        if normalization is not None:
+            _record_normalization(normalization, parsed)
         parsed = _normalize_loose_response(parsed)
         error = validate_json_schema(parsed, REACTION_SCHEMA)
         if error:
             path, message = error
             raise ValueError(f"schema_error:{path}:{message}")
     return parsed
+
+
+def _record_normalization(normalization: dict[str, bool], parsed: Any) -> None:
+    """Note that the loose path ran, and whether it had to invent a stance."""
+    normalization["loose"] = True
+    if not isinstance(parsed, dict):
+        # Nothing usable arrived, so every field is about to be substituted.
+        normalization["stance_unrecognized"] = True
+        normalization["severity_unrecognized"] = True
+        return
+    raw_stance = str(parsed.get("stance") or parsed.get("sentiment") or "")
+    raw_severity = str(
+        parsed.get("objection_severity") or parsed.get("severity") or ""
+    )
+    normalization["stance_unrecognized"] = raw_stance not in STANCE_VALUES
+    normalization["severity_unrecognized"] = raw_severity not in SEVERITY_VALUES
 
 
 def _reasoning_effort_for_model(model: str) -> str:
@@ -716,7 +796,10 @@ def _normalize_stance(value: str) -> str:
     text = value.lower()
     if any(token in text for token in ("negative", "skeptic", "concern", "bad")):
         return "skeptical"
-    if any(token in text for token in ("unclear", "confus", "translate")):
+    # "translat" rather than "translate": the enum value is "needs_translation",
+    # which the longer token does not match, so a correct answer reaching this
+    # function used to be rewritten as "curious".
+    if any(token in text for token in ("unclear", "confus", "translat")):
         return "needs_translation"
     if any(token in text for token in ("positive", "interested", "amazing", "good")):
         return "interested"
@@ -737,6 +820,11 @@ def _min_text(value: str, fallback: str, min_length: int = 12) -> str:
     if len(cleaned) >= min_length:
         return cleaned
     return fallback
+
+
+def _value_distribution(values: Iterable[str]) -> dict[str, int]:
+    """Count how often each value appears, most common first."""
+    return dict(Counter(str(value) for value in values).most_common())
 
 
 def _empty_live_receipt() -> dict[str, Any]:
@@ -769,6 +857,17 @@ def _empty_live_receipt() -> dict[str, Any]:
         "max_duplicate_objections": 0,
         "near_duplicate_objections": 0,
         "weak_topic_grounding": 0,
+        # How much of the result the loose fallback wrote instead of the model.
+        # schema_fallback_count is a different thing: it counts providers that
+        # could not honour a strict json_schema request.
+        "loose_normalization_count": 0,
+        "unrecognized_stance_count": 0,
+        "unrecognized_severity_count": 0,
+        # Whether the panel actually disagreed with itself. A run where every
+        # persona lands on the same stance carries no signal, however clean it
+        # looks by every other measure.
+        "stance_distribution": {},
+        "severity_distribution": {},
         "run_timed_out": False,
         "failed_persona_count": 0,
         "low_quality_persona_count": 0,
