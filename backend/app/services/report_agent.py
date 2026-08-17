@@ -20,6 +20,7 @@ from enum import Enum
 from ..config import Config
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
+from ..utils.resource_ids import safe_child_path
 from .graph_tools import (
     GraphToolsService
 )
@@ -43,8 +44,15 @@ class ReportLogger:
             report_id: Report ID, used to determine the log file path
         """
         self.report_id = report_id
+        # Builds its own path instead of going through ReportManager, so it needs
+        # the same validation; otherwise fixing only the manager leaves this open.
         self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'agent_log.jsonl'
+            safe_child_path(
+                os.path.join(Config.UPLOAD_FOLDER, 'reports'),
+                report_id,
+                kind="report_id",
+            ),
+            'agent_log.jsonl',
         )
         self.start_time = datetime.now()
         self._ensure_log_file()
@@ -314,8 +322,14 @@ class ReportConsoleLogger:
             report_id: Report ID, used to determine the log file path
         """
         self.report_id = report_id
+        # Same bypass as ReportLogger above: builds the path itself.
         self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'console_log.txt'
+            safe_child_path(
+                os.path.join(Config.UPLOAD_FOLDER, 'reports'),
+                report_id,
+                kind="report_id",
+            ),
+            'console_log.txt',
         )
         self._ensure_log_file()
         self._file_handler = None
@@ -1911,8 +1925,12 @@ class ReportManager:
     
     @classmethod
     def _get_report_folder(cls, report_id: str) -> str:
-        """getreportfolderpath"""
-        return os.path.join(cls.REPORTS_DIR, report_id)
+        """Get the report folder path, rejecting ids that could escape it.
+
+        `DELETE /api/report/%2e%2e` reached delete_report and rmtree'd the whole
+        uploads tree. See app/utils/resource_ids.py.
+        """
+        return safe_child_path(cls.REPORTS_DIR, report_id, kind="report_id")
     
     @classmethod
     def _ensure_report_folder(cls, report_id: str) -> str:

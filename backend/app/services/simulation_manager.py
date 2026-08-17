@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum
 
 from ..utils.logger import get_logger
+from ..utils.resource_ids import safe_child_path
 from .entity_reader import EntityReader
 from .oasis_profile_generator import OasisProfileGenerator
 from .simulation_config_generator import SimulationConfigGenerator
@@ -137,8 +138,14 @@ class SimulationManager:
         self._simulations: Dict[str, SimulationState] = {}
     
     def _get_simulation_dir(self, simulation_id: str) -> str:
-        """Get simulation data directory"""
-        sim_dir = os.path.join(self.SIMULATION_DATA_DIR, simulation_id)
+        """Get simulation data directory, rejecting ids that could escape it.
+
+        Same shape as the project and report managers, and it calls makedirs, so
+        an unchecked id would create directories outside the data root.
+        """
+        sim_dir = safe_child_path(
+            self.SIMULATION_DATA_DIR, simulation_id, kind="simulation_id"
+        )
         os.makedirs(sim_dir, exist_ok=True)
         return sim_dir
     
