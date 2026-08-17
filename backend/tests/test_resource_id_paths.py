@@ -86,6 +86,34 @@ def test_delete_project_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkey
     assert sorted(p.name for p in uploads.iterdir()) == ["projects", "reports"]
 
 
+def test_delete_report_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkeypatch):
+    """The second reachable route, and the one that also leaked its path.
+
+    ReportManager.delete_report reached the same rmtree, and the JSON error body
+    echoed the absolute directory back to the caller.
+    """
+    from app.services.report_agent import ReportManager
+
+    uploads = tmp_path / "uploads"
+    reports = uploads / "reports"
+    reports.mkdir(parents=True)
+    (reports / "report_0123456789ab").mkdir()
+    (reports / "keep.md").write_text("survive")
+    (uploads / "projects").mkdir()
+
+    monkeypatch.setattr(ReportManager, "REPORTS_DIR", str(reports))
+    client = create_app().test_client()
+
+    response = client.delete("/api/report/%2e%2e")
+
+    assert response.status_code >= 400
+    assert (reports / "keep.md").read_text() == "survive"
+    assert (reports / "report_0123456789ab").exists()
+    assert sorted(p.name for p in uploads.iterdir()) == ["projects", "reports"]
+    # The rejection must not hand the caller a filesystem path.
+    assert str(tmp_path) not in response.get_data(as_text=True)
+
+
 def test_delete_project_endpoint_still_reports_a_missing_project(tmp_path, monkeypatch):
     """Validation must not turn every lookup into an error."""
     projects = tmp_path / "projects"
