@@ -55,6 +55,9 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Read once: several blocks below depend on it and a test subclass may set it.
+    simulation_enabled = bool(app.config.get('MIROFISH_ENABLE_SIMULATION', False))
+
     # Configure JSON encoding: ensure Chinese displays directly (not as \uXXXX)
     # Flask >= 2.3 uses app.json.ensure_ascii, older versions use JSON_AS_ASCII config
     if hasattr(app, 'json') and hasattr(app.json, 'ensure_ascii'):
@@ -97,11 +100,13 @@ def create_app(config_class=Config):
     register_default_work_providers(lifecycle)
     register_lifecycle(app, lifecycle)
 
-    # Register simulation process cleanup function (ensure all simulation processes terminate on server shutdown)
-    from .services.simulation_runner import SimulationRunner
-    SimulationRunner.register_cleanup()
-    if should_log_startup:
-        logger.info("Simulation process cleanup function registered")
+    # Reap simulation subprocesses on shutdown. Pointless when the lane cannot be
+    # reached, since nothing will have started one.
+    if simulation_enabled:
+        from .services.simulation_runner import SimulationRunner
+        SimulationRunner.register_cleanup()
+        if should_log_startup:
+            logger.info("Simulation process cleanup function registered")
 
     # Request logging middleware
     @app.before_request
@@ -127,12 +132,23 @@ def create_app(config_class=Config):
         logger.debug(f"Response: {response.status_code}")
         return response
 
-    # Register blueprints
+    # Register blueprints. The audience lane is the product; the document-graph
+    # and simulation lanes are the inherited fork, off unless asked for.
+    #
+    # Only registration is conditional, not the import. Making the import
+    # conditional too was measured and rejected: with camel out of the default
+    # install, importing api.simulation costs about 14 ms and pulls in nothing
+    # heavy, so the complexity bought nothing.
     from .api import audience_bp, graph_bp, report_bp, simulation_bp
-    app.register_blueprint(graph_bp, url_prefix='/api/graph')
-    app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
-    app.register_blueprint(report_bp, url_prefix='/api/report')
     app.register_blueprint(audience_bp, url_prefix='/api/audience')
+    if simulation_enabled:
+        app.register_blueprint(graph_bp, url_prefix='/api/graph')
+        app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
+        app.register_blueprint(report_bp, url_prefix='/api/report')
+    elif should_log_startup:
+        logger.info(
+            "Simulation lane disabled; set MIROFISH_ENABLE_SIMULATION=true to register it"
+        )
     register_frontend_routes(app)
 
     if should_log_startup:

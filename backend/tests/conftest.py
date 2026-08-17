@@ -49,6 +49,11 @@ def isolated_audience_store(monkeypatch):
     # Explicit beats accidental: the API returns the in-process store because it
     # was asked to, not because Neo4j blew up on the way in.
     monkeypatch.setattr(Config, "MIROFISH_AUDIENCE_STORE", "memory")
+    # Pin the simulation lane off regardless of the operator's shell. With
+    # load_dotenv(override=False) an exported MIROFISH_ENABLE_SIMULATION=true
+    # would otherwise flip the whole suite into flag-on and quietly change what
+    # is being tested. Subclasses that set it explicitly still win.
+    monkeypatch.setattr(Config, "MIROFISH_ENABLE_SIMULATION", False)
     monkeypatch.setattr(storage, "Neo4jStorage", _UnavailableStorage)
     monkeypatch.setattr(audience_api, "_STORE", InMemoryAudienceGraphStore())
     yield

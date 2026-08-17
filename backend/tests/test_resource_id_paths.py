@@ -15,8 +15,21 @@ from __future__ import annotations
 import pytest
 
 from app import create_app
+from app.config import Config
 from app.models.project import ProjectManager
 from app.utils.resource_ids import UnsafeResourceId, safe_child_path, validate_resource_id
+
+
+class SimulationOn(Config):
+    """The routes under test belong to the simulation lane, off by default.
+
+    Without pinning the flag these tests would still pass, and mean nothing: an
+    unregistered `/api/...` DELETE answers 405, because the SPA catch-all only
+    accepts GET, and 405 satisfies `>= 400` exactly as well as a real rejection
+    does. The traversal guard would be untested and nobody would notice.
+    """
+
+    MIROFISH_ENABLE_SIMULATION = True
 
 
 ESCAPES = [
@@ -75,11 +88,14 @@ def test_delete_project_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkey
     (canary / "keep.md").write_text("survive")
 
     monkeypatch.setattr(ProjectManager, "PROJECTS_DIR", str(projects))
-    client = create_app().test_client()
+    app = create_app(SimulationOn)
+    assert "graph" in app.blueprints, "route must exist for this test to mean anything"
+    client = app.test_client()
 
     response = client.delete("/api/graph/project/%2e%2e")
 
     assert response.status_code >= 400
+    assert response.status_code != 405, "405 would mean the route is simply gone"
     # The whole point: everything is still on disk.
     assert (projects / "proj_0123456789ab" / "project.json").exists()
     assert (canary / "keep.md").read_text() == "survive"
@@ -102,11 +118,14 @@ def test_delete_report_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkeyp
     (uploads / "projects").mkdir()
 
     monkeypatch.setattr(ReportManager, "REPORTS_DIR", str(reports))
-    client = create_app().test_client()
+    app = create_app(SimulationOn)
+    assert "report" in app.blueprints, "route must exist for this test to mean anything"
+    client = app.test_client()
 
     response = client.delete("/api/report/%2e%2e")
 
     assert response.status_code >= 400
+    assert response.status_code != 405, "405 would mean the route is simply gone"
     assert (reports / "keep.md").read_text() == "survive"
     assert (reports / "report_0123456789ab").exists()
     assert sorted(p.name for p in uploads.iterdir()) == ["projects", "reports"]
@@ -119,8 +138,10 @@ def test_delete_project_endpoint_still_reports_a_missing_project(tmp_path, monke
     projects = tmp_path / "projects"
     projects.mkdir(parents=True)
     monkeypatch.setattr(ProjectManager, "PROJECTS_DIR", str(projects))
-    client = create_app().test_client()
+    client = create_app(SimulationOn).test_client()
 
     response = client.delete("/api/graph/project/proj_0123456789ab")
 
+    # Not widened to include 405: that would hide the route disappearing, which
+    # is the exact failure this file exists to catch.
     assert response.status_code in (200, 404)

@@ -34,6 +34,14 @@ class Config:
     MIROFISH_START_DRAINED = (
         os.environ.get('MIROFISH_START_DRAINED', 'false').lower() == 'true'
     )
+    # Registers /api/graph, /api/simulation and /api/report. Off by default: the
+    # lane handled one Entity node and five Episodes in production before being
+    # abandoned, and it is the larger half of the API surface with no test
+    # covering its routes. Enabling it also needs `uv sync --extra simulator`,
+    # since camel-oasis is no longer part of the default install.
+    MIROFISH_ENABLE_SIMULATION = (
+        os.environ.get('MIROFISH_ENABLE_SIMULATION', 'false').lower() == 'true'
+    )
 
     # JSON configuration - disable ASCII escaping to display Chinese directly (not as \uXXXX)
     JSON_AS_ASCII = False
