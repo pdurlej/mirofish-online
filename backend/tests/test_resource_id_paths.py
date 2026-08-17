@@ -94,8 +94,9 @@ def test_delete_project_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkey
 
     response = client.delete("/api/graph/project/%2e%2e")
 
-    assert response.status_code >= 400
-    assert response.status_code != 405, "405 would mean the route is simply gone"
+    # Exactly 400, not merely "an error": 405 would mean the route vanished and
+    # 500 would mean the guard threw instead of refusing.
+    assert response.status_code == 400
     # The whole point: everything is still on disk.
     assert (projects / "proj_0123456789ab" / "project.json").exists()
     assert (canary / "keep.md").read_text() == "survive"
@@ -124,8 +125,9 @@ def test_delete_report_endpoint_leaves_the_uploads_tree_intact(tmp_path, monkeyp
 
     response = client.delete("/api/report/%2e%2e")
 
-    assert response.status_code >= 400
-    assert response.status_code != 405, "405 would mean the route is simply gone"
+    # This route catches Exception itself, so it re-raises UnsafeResourceId to
+    # let the app-level handler answer 400 rather than reporting a server fault.
+    assert response.status_code == 400
     assert (reports / "keep.md").read_text() == "survive"
     assert (reports / "report_0123456789ab").exists()
     assert sorted(p.name for p in uploads.iterdir()) == ["projects", "reports"]

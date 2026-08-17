@@ -20,6 +20,7 @@ from .lifecycle import (  # noqa: E402
     register_default_work_providers,
     register_lifecycle,
 )
+from .utils.error_contract import register_error_handlers  # noqa: E402
 from .utils.logger import get_logger, setup_logger  # noqa: E402
 
 
@@ -75,6 +76,18 @@ def create_app(config_class=Config):
         logger.info("=" * 50)
         logger.info("MiroFish-Offline Backend starting...")
         logger.info("=" * 50)
+
+    # Config.validate was only ever called from run.py, the development entry
+    # point. Production starts with `gunicorn app:create_app()`, so a missing
+    # LLM_API_KEY first showed up as failing personas inside a paid run.
+    #
+    # Logged rather than raised, on purpose. Raising would break CI, which runs
+    # the suite without provider credentials, and it would buy little: readiness
+    # already fails closed and the lifecycle script gates the start on it. What
+    # was missing was not a crash but a message, and this is the first thing in
+    # the startup log.
+    for problem in config_class.validate():
+        logger.error("Configuration problem: %s", problem)
 
     # Enable CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -150,6 +163,11 @@ def create_app(config_class=Config):
             "Simulation lane disabled; set MIROFISH_ENABLE_SIMULATION=true to register it"
         )
     register_frontend_routes(app)
+
+    # After the blueprints, so routes that handle their own exceptions keep
+    # doing so; this only shapes what escapes them, which was Werkzeug's HTML
+    # page. See app/utils/error_contract.py.
+    register_error_handlers(app)
 
     if should_log_startup:
         logger.info("MiroFish-Offline Backend startup complete")
