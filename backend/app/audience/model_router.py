@@ -12,6 +12,17 @@ from .personas import AudiencePersona
 DEFAULT_MODEL_POOL = (
     "gemma4:31b",
 )
+# Deliberately equal to the pool's only entry, which makes the rescue path a
+# no-op out of the box: _should_high_quality_retry requires model != retry_model.
+# Naming a specific second model here would assume every deployment can reach
+# it, so the default stays honest and `high_quality_retry_available` in the
+# receipt reports when nothing can be retried. Set
+# MIROFISH_AUDIENCE_RETRY_MODEL to switch it on.
+#
+# Entry criteria for that variable, from the measured bake-offs: zero schema
+# fallbacks across a batch and full reaction coverage. On 2026-07-08 only
+# deepseek-v4-pro cleared both (12/12 green, 240/240 reactions, 0 fallbacks);
+# gemma4:31b won the earlier bake-off and stays the default pool.
 HIGH_QUALITY_RETRY_MODEL = "gemma4:31b"
 
 
@@ -38,11 +49,19 @@ class ModelRouter:
         high_quality_retry_model: str | None = None,
     ) -> None:
         self.model_pool = model_pool or _model_pool_from_env()
-        self.high_quality_retry_model = (
+        # Normalized like the pool entries. Without this a retry model given as
+        # "deepseek-v4-pro:cloud" would never match a pool that had its suffix
+        # stripped, and the mismatch would look like a working rescue path.
+        self.high_quality_retry_model = _normalize_model_id(
             high_quality_retry_model
             or os.environ.get("MIROFISH_AUDIENCE_RETRY_MODEL")
             or HIGH_QUALITY_RETRY_MODEL
         )
+
+    @property
+    def high_quality_retry_available(self) -> bool:
+        """Whether a failed persona can actually be retried on a different model."""
+        return self.high_quality_retry_model not in self.model_pool
 
     def assign(
         self,

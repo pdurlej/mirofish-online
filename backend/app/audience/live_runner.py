@@ -241,6 +241,11 @@ class AudienceLiveRunner:
         receipt["model_routing"] = {
             "model_pool": list(self._model_router.model_pool),
             "high_quality_retry_model": self._model_router.high_quality_retry_model,
+            # False when the retry model is already in the pool, which makes the
+            # rescue path unreachable. It was silently unreachable by default.
+            "high_quality_retry_available": (
+                self._model_router.high_quality_retry_available
+            ),
             "failure_threshold": self._failure_threshold,
             "max_workers": self._max_workers,
         }
@@ -360,6 +365,9 @@ class AudienceLiveRunner:
 
         receipt["latency_ms"] = int((time.monotonic() - started) * 1000)
         receipt["failed_persona_count"] = len(failures)
+        _warn_if_retry_was_unavailable(
+            receipt, failures, available=self._model_router.high_quality_retry_available
+        )
         receipt["failure_rate"] = round(len(failures) / len(active_personas), 3)
         receipt["reliability_grade"] = _reliability_grade(receipt["failure_rate"])
         receipt["stance_distribution"] = _value_distribution(
@@ -951,6 +959,7 @@ def _empty_live_receipt() -> dict[str, Any]:
         "model_routing": {
             "model_pool": [],
             "high_quality_retry_model": None,
+            "high_quality_retry_available": False,
             "failure_threshold": None,
             "max_workers": None,
         },
@@ -1108,6 +1117,40 @@ def _apply_batch_quality_audit(
     # quality_warnings[0]. Ordering does not affect the grade: _lower_reliability
     # only ever moves it down.
     _audit_stance_signal(receipt, reactions or [])
+
+
+def _warn_if_retry_was_unavailable(
+    receipt: dict[str, Any],
+    failures: list[dict[str, Any]],
+    *,
+    available: bool,
+) -> None:
+    """Say so when a persona could have been rescued but there was nothing to try.
+
+    Deliberately silent unless it actually cost something: a dead retry layer on
+    a run where nobody failed is a configuration note, not a quality problem.
+    The grade is left alone, because the failures themselves already move it.
+    """
+    if available or not failures:
+        return
+    retryable = [
+        failure
+        for failure in failures
+        if failure.get("error_kind") in RETRYABLE_PERSONA_ERRORS
+    ]
+    if not retryable:
+        return
+    receipt.setdefault("quality_warnings", []).append(
+        {
+            "kind": "retry_layer_unavailable",
+            "message": (
+                "Personas failed with retryable errors, but the high-quality retry "
+                "model is already in the pool, so nothing could be retried. Set "
+                "MIROFISH_AUDIENCE_RETRY_MODEL to a different model."
+            ),
+            "count": len(retryable),
+        }
+    )
 
 
 def _audit_stance_signal(
