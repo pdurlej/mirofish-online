@@ -366,6 +366,11 @@ class Neo4jAudienceGraphStore:
                 ORDER BY r.created_at DESC
                 WITH t, head(collect(r)) AS latest_run
                 WHERE latest_run IS NOT NULL
+                // ORDER BY and LIMIT are sub-clauses of WITH or RETURN, so they
+                // cannot hang off a WHERE. Without this re-projection Neo4j
+                // rejects the whole statement with a syntax error, which made
+                // every live run fail before its first LLM call.
+                WITH t, latest_run
                 ORDER BY coalesce(t.updated_at, latest_run.created_at) DESC
                 LIMIT $limit
                 CALL {
