@@ -36,6 +36,8 @@ def audience_active_work() -> dict[str, int]:
 
 
 def _get_store():
+    if Config.MIROFISH_AUDIENCE_STORE == "memory":
+        return _STORE
     storage = current_app.extensions.get("neo4j_storage")
     if storage:
         return Neo4jAudienceGraphStore(storage)

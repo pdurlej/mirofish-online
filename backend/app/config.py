@@ -56,6 +56,12 @@ class Config:
     MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS = int(
         os.environ.get('MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS', '64')
     )
+    # Audience storage selection. 'auto' uses Neo4j when it initialized, and the
+    # in-process store otherwise. 'memory' demands the in-process store, so tests
+    # and offline runs no longer depend on a Neo4j failure to get one.
+    MIROFISH_AUDIENCE_STORE = os.environ.get(
+        'MIROFISH_AUDIENCE_STORE', 'auto'
+    ).strip().lower()
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
