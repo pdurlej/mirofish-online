@@ -20,8 +20,10 @@ class FakeResult:
 class RecordingStore:
     def __init__(self) -> None:
         self.runs: dict[str, dict[str, str]] = {}
+        self.previous_topics_calls: list[bool] = []
 
-    def previous_topics(self) -> list[dict]:
+    def previous_topics(self, limit: int = 25, *, live_only: bool = False) -> list[dict]:
+        self.previous_topics_calls.append(live_only)
         return []
 
     def write_run(self, result: FakeResult) -> dict[str, int]:
@@ -104,3 +106,21 @@ def test_enqueue_is_idempotent_while_the_same_run_is_active():
     assert first["run_id"] == second["run_id"]
     assert second["status"] in {"queued", "running"}
     assert BlockingRunner.calls == 1
+
+
+def test_live_runs_ask_for_live_only_reviewer_memory():
+    """The live path must not be fed imported or fake history.
+
+    Reviewer memory is quoted back to the personas as their own past reactions,
+    and production holds 73 runs from a one-off research import plus fake runs
+    from the UI toggle. A live run that learns from those is learning from a
+    different system. This asserts the request, because the alternative is
+    noticing months later that the panel remembers things it never said.
+    """
+    store = RecordingStore()
+    manager = AudienceRunManager(runner_factory=FastRunner)
+
+    manager.enqueue(_run_input(1), store)
+    _wait_until_idle(manager)
+
+    assert store.previous_topics_calls == [True]

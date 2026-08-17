@@ -927,10 +927,23 @@ def test_neo4j_previous_topics_reads_compact_reviewer_memory_projection():
         def _call_with_retry(callback, *args):  # noqa: ANN001
             return callback(*args)
 
-    previous = Neo4jAudienceGraphStore(FakeStorage()).previous_topics(limit=7)
+    store = Neo4jAudienceGraphStore(FakeStorage())
+    previous = store.previous_topics(limit=7)
 
     assert "payload_json" not in str(captured["query"])
-    assert captured["parameters"] == {"limit": 7}
+    assert captured["parameters"] == {
+        "limit": 7,
+        "live_only": False,
+        "live_mode": "live",
+    }
+
+    # The provenance filter has to reach the query as a parameter, not just be
+    # asked for in Python. Without this the flag could be dropped on the way to
+    # Cypher and the panel would keep learning from the research import.
+    store.previous_topics(limit=7, live_only=True)
+    assert captured["parameters"]["live_only"] is True
+    assert "$live_only" in str(captured["query"])
+    assert "r.mode = $live_mode" in str(captured["query"])
     assert previous == [
         {
             "id": "topic-previous",
