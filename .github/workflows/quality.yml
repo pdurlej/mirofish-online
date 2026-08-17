@@ -33,6 +33,43 @@ jobs:
       - name: Ruff changed Python files
         run: python3 scripts/ruff_changed.py
 
+  cypher:
+    # A live production run failed in 25 ms with a Cypher syntax error that no
+    # other job could see: the rest of the suite uses the in-process store, which
+    # never parses Cypher, and the history and graph queries were fine, so the UI
+    # looked healthy while every live run was impossible. Neo4j validates syntax
+    # on EXPLAIN without touching data, so this is cheap to keep permanently.
+    name: Audience Cypher parses
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5.18-community
+        env:
+          NEO4J_AUTH: neo4j/ci-cypher-check
+          NEO4J_server_memory_heap_max__size: 512m
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ci-cypher-check 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --group dev
+      - name: Explain every statement the audience store sends
+        working-directory: backend
+        env:
+          MIROFISH_TEST_NEO4J_URI: bolt://localhost:7687
+          MIROFISH_TEST_NEO4J_PASSWORD: ci-cypher-check
+        run: uv run pytest tests/test_graph_store_cypher.py -v
+
   frontend:
     name: Frontend build
     runs-on: ubuntu-latest
