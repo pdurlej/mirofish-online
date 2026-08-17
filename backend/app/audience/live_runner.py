@@ -168,6 +168,14 @@ GENERIC_OBJECTION_FALLBACKS = {
 }
 MAX_GREEN_DUPLICATE_OBJECTION_COUNT = 2
 MAX_YELLOW_DUPLICATE_OBJECTION_COUNT = 4
+# A panel that agrees with itself has told you nothing. Production held 76 runs
+# where all twenty personas were stored with the same stance, every one graded
+# green, because nothing looked at the spread.
+MIN_GREEN_STANCE_VARIETY = 2
+MAX_GREEN_DOMINANT_STANCE_SHARE = 0.85
+# How much of the panel's stance the fallback may have picked before the run
+# stops counting as trustworthy.
+MAX_GREEN_UNRECOGNIZED_STANCE_SHARE = 0.2
 RETRYABLE_PERSONA_ERRORS = {
     "invalid_json",
     "schema_validation_failed",
@@ -356,6 +364,7 @@ class AudienceLiveRunner:
             receipt,
             objections,
             topic_text=f"{run_input.display_title} {run_input.topic}",
+            reactions=reactions,
         )
 
         if receipt["failure_rate"] > self._failure_threshold:
@@ -713,8 +722,10 @@ def _record_normalization(normalization: dict[str, bool], parsed: Any) -> None:
     raw_severity = str(
         parsed.get("objection_severity") or parsed.get("severity") or ""
     )
-    normalization["stance_unrecognized"] = raw_stance not in STANCE_VALUES
-    normalization["severity_unrecognized"] = raw_severity not in SEVERITY_VALUES
+    # "Unrecognized" means the fallback had to pick, not merely that the raw
+    # value was not literally an enum member.
+    normalization["stance_unrecognized"] = not _resolve_stance(raw_stance)[1]
+    normalization["severity_unrecognized"] = not _resolve_severity(raw_severity)[1]
 
 
 def _reasoning_effort_for_model(model: str) -> str:
@@ -792,27 +803,73 @@ def _validate_reaction_quality(parsed: dict[str, Any]) -> None:
         raise ValueError("low_quality_response")
 
 
+def _resolve_stance(value: str) -> tuple[str, bool]:
+    """Map a free-form stance onto the enum.
+
+    The second element is False only when nothing matched and the fallback had
+    to pick for the model. That distinction is what makes the guess countable:
+    "Sceptyczny" is now understood, so it is not reported as a lost stance,
+    while genuinely opaque text still is.
+    """
+    text = value.strip().lower()
+    if text in STANCE_VALUES:
+        return text, True
+    if any(
+        token in text
+        for token in (
+            "negative", "skeptic", "concern", "bad", "doubt",
+            # Polish stems. The prompt asks for Polish values on Polish topics,
+            # and "sceptyczny" contains no "skeptic" because Polish spells it
+            # with a c, which is how every Polish stance became "curious".
+            "sceptyc", "krytyc", "negatyw", "wątpliw", "watpliw", "obaw", "ryzyk",
+        )
+    ):
+        return "skeptical", True
+    if any(
+        token in text
+        for token in (
+            # "translat", not "translate": the enum value is "needs_translation".
+            "unclear", "confus", "translat",
+            "niejasn", "niezrozum", "tłumacz", "tlumacz",
+        )
+    ):
+        return "needs_translation", True
+    if any(
+        token in text
+        for token in (
+            "positive", "interested", "amazing", "good", "support",
+            "zainteresow", "pozytyw", "entuzj", "świetn", "swietn", "popier",
+        )
+    ):
+        return "interested", True
+    if any(
+        token in text
+        for token in ("curious", "neutral", "mixed", "ciekaw", "neutraln", "mieszan")
+    ):
+        return "curious", True
+    return "curious", False
+
+
+def _resolve_severity(value: str) -> tuple[str, bool]:
+    """Map a free-form severity onto the enum; False when the fallback guessed."""
+    text = value.strip().lower()
+    if text in SEVERITY_VALUES:
+        return text, True
+    if any(token in text for token in ("high", "critical", "wysok", "krytyc", "poważn", "powazn")):
+        return "high", True
+    if any(token in text for token in ("low", "minor", "nisk", "drobn", "błah", "blah")):
+        return "low", True
+    if any(token in text for token in ("medium", "moderate", "średni", "sredni", "umiarkowan")):
+        return "medium", True
+    return "medium", False
+
+
 def _normalize_stance(value: str) -> str:
-    text = value.lower()
-    if any(token in text for token in ("negative", "skeptic", "concern", "bad")):
-        return "skeptical"
-    # "translat" rather than "translate": the enum value is "needs_translation",
-    # which the longer token does not match, so a correct answer reaching this
-    # function used to be rewritten as "curious".
-    if any(token in text for token in ("unclear", "confus", "translat")):
-        return "needs_translation"
-    if any(token in text for token in ("positive", "interested", "amazing", "good")):
-        return "interested"
-    return "curious"
+    return _resolve_stance(value)[0]
 
 
 def _normalize_severity(value: str) -> str:
-    text = value.lower()
-    if "high" in text or "critical" in text:
-        return "high"
-    if "low" in text or "minor" in text:
-        return "low"
-    return "medium"
+    return _resolve_severity(value)[0]
 
 
 def _min_text(value: str, fallback: str, min_length: int = 12) -> str:
@@ -942,6 +999,7 @@ def _apply_batch_quality_audit(
     objections: list[dict[str, Any]],
     *,
     topic_text: str,
+    reactions: list[dict[str, Any]] | None = None,
 ) -> None:
     duplicates = _duplicate_objection_stats(objections)
     receipt["duplicate_objection_count"] = duplicates["duplicate_objection_count"]
@@ -993,6 +1051,69 @@ def _apply_batch_quality_audit(
         )
         weak_share = weak_grounding_count / max(len(objections), 1)
         _lower_reliability(receipt, "red" if weak_share > 0.4 else "yellow")
+
+    # Last, so the existing warning order stays stable for callers that read
+    # quality_warnings[0]. Ordering does not affect the grade: _lower_reliability
+    # only ever moves it down.
+    _audit_stance_signal(receipt, reactions or [])
+
+
+def _audit_stance_signal(
+    receipt: dict[str, Any], reactions: list[dict[str, Any]]
+) -> None:
+    """Refuse to call a run green when the panel carries no disagreement.
+
+    Two separate failures land here. A panel that answered with one stance has
+    no signal to read, whatever its schema validity. And a panel whose stances
+    were mostly picked by the fallback is not reporting the model's opinion at
+    all — it is reporting ours.
+    """
+    if not reactions:
+        return
+
+    distribution = receipt.get("stance_distribution") or _value_distribution(
+        reaction["stance"] for reaction in reactions
+    )
+    total = sum(distribution.values())
+    if not total:
+        return
+
+    dominant_share = max(distribution.values()) / total
+    if (
+        len(distribution) < MIN_GREEN_STANCE_VARIETY
+        or dominant_share > MAX_GREEN_DOMINANT_STANCE_SHARE
+    ):
+        receipt.setdefault("quality_warnings", []).append(
+            {
+                "kind": "flat_stance_signal",
+                "message": (
+                    "The panel barely disagreed, so the run cannot separate this "
+                    "topic from any other."
+                ),
+                "distinct_stances": len(distribution),
+                "dominant_stance_share": round(dominant_share, 3),
+            }
+        )
+        _lower_reliability(
+            receipt, "red" if len(distribution) < MIN_GREEN_STANCE_VARIETY else "yellow"
+        )
+
+    unrecognized = int(receipt.get("unrecognized_stance_count") or 0)
+    if unrecognized:
+        unrecognized_share = unrecognized / total
+        if unrecognized_share > MAX_GREEN_UNRECOGNIZED_STANCE_SHARE:
+            receipt.setdefault("quality_warnings", []).append(
+                {
+                    "kind": "substituted_stances",
+                    "message": (
+                        "Several stances were chosen by the fallback rather than by "
+                        "the personas."
+                    ),
+                    "count": unrecognized,
+                    "share": round(unrecognized_share, 3),
+                }
+            )
+            _lower_reliability(receipt, "red" if unrecognized_share > 0.5 else "yellow")
 
 
 def _duplicate_objection_stats(objections: list[dict[str, Any]]) -> dict[str, int]:

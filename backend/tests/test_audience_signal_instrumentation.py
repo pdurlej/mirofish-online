@@ -47,14 +47,28 @@ def test_clean_response_reports_no_normalization():
     assert normalization == {}
 
 
-def test_off_enum_stance_is_reported_as_an_invented_stance():
+def test_polish_stance_is_understood_rather_than_flattened():
+    """The core regression. "sceptyczny" holds no "skeptic": Polish spells it
+    with a c, so every Polish stance used to collapse into "curious"."""
     normalization: dict[str, bool] = {}
     parsed = _parse_and_validate(
-        _reaction(stance="Sceptyczny, bo brak dowodu"), normalization=normalization
+        _reaction(stance="Sceptyczny, bo brak dowodu", objection_severity="wysoka"),
+        normalization=normalization,
     )
 
-    # The fallback still produces a schema-valid run, which is why this was
-    # invisible: the value below was chosen by MiroFish, not by the persona.
+    assert parsed["stance"] == "skeptical"
+    assert parsed["objection_severity"] == "high"
+    # The loose path still ran, but nothing had to be guessed.
+    assert normalization["loose"] is True
+    assert normalization["stance_unrecognized"] is False
+    assert normalization["severity_unrecognized"] is False
+
+
+def test_opaque_stance_is_reported_as_substituted():
+    """When nothing matches, the fallback still picks, but now it says so."""
+    normalization: dict[str, bool] = {}
+    parsed = _parse_and_validate(_reaction(stance="n/a"), normalization=normalization)
+
     assert parsed["stance"] in STANCE_VALUES
     assert normalization["loose"] is True
     assert normalization["stance_unrecognized"] is True
@@ -145,13 +159,12 @@ class _CyclingStanceClient:
         )
 
 
-def test_run_receipt_exposes_the_production_flattening():
-    """End-to-end reproduction of what the production graph actually holds.
+def test_polish_answers_no_longer_collapse_into_curious():
+    """End-to-end: the exact input that produced the production distribution.
 
-    The prompt asks for Polish string values on Polish topics while `stance` and
-    `objection_severity` are English enums, so the model answers "Sceptyczny" and
-    "wysoka" and every persona is stored as curious/medium. Before this wave the
-    receipt reported such a run as if the model had chosen those values.
+    A model told to write Polish values answers "Sceptyczny"/"wysoka". That used
+    to be stored as curious/medium for all twenty personas, which is how 113 live
+    runs ended up 95.3% curious. The stance now survives.
     """
     scripted = _ScriptedClient(_reaction(stance="Sceptyczny", objection_severity="wysoka"))
     result = AudienceLiveRunner(client_factory=lambda: scripted).run(
@@ -159,14 +172,32 @@ def test_run_receipt_exposes_the_production_flattening():
     )
     receipt = result.to_dict()["receipt"]
 
-    # The pathology itself: twenty personas, one stance, one severity.
-    assert receipt["stance_distribution"] == {"curious": 20}
-    assert receipt["severity_distribution"] == {"medium": 20}
-
-    # And now it is attributable rather than invisible.
+    assert receipt["stance_distribution"] == {"skeptical": 20}
+    assert receipt["severity_distribution"] == {"high": 20}
+    assert receipt["unrecognized_stance_count"] == 0
+    assert receipt["unrecognized_severity_count"] == 0
+    # The loose path still ran, and the receipt still admits it.
     assert receipt["loose_normalization_count"] == 20
+
+
+def test_uniform_panel_is_not_allowed_to_stay_green():
+    """A panel that agrees with itself cannot separate this topic from any other.
+
+    Production held 76 runs where all twenty personas shared one stance, every
+    one graded green, because nothing looked at the spread.
+    """
+    scripted = _ScriptedClient(_reaction(stance="n/a"))
+    result = AudienceLiveRunner(client_factory=lambda: scripted).run(
+        AudienceRunInput(topic="Uniform panel probe", run_seed="flat")
+    )
+    receipt = result.to_dict()["receipt"]
+    kinds = {warning["kind"] for warning in receipt["quality_warnings"]}
+
+    assert len(receipt["stance_distribution"]) == 1
+    assert "flat_stance_signal" in kinds
+    assert "substituted_stances" in kinds
     assert receipt["unrecognized_stance_count"] == 20
-    assert receipt["unrecognized_severity_count"] == 20
+    assert receipt["reliability_grade"] == "red"
 
 
 def test_run_receipt_stays_quiet_when_the_model_answers_in_enum():
