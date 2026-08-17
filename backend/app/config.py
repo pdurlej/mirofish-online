@@ -7,15 +7,20 @@ import os
 
 from dotenv import load_dotenv
 
-# Load .env file from project root
-# Path: MiroFish/.env (relative to backend/app/config.py)
+# Load .env from the project root: MiroFish/.env, relative to this file.
+#
+# override=False so a real environment variable wins over the file. The previous
+# override=True inverted that: values injected by docker-compose `environment:`
+# or by the shell were silently replaced by whatever a stray .env happened to
+# contain. The production image never copies .env, so this changes nothing there
+# -- it removes a way to be surprised locally.
 project_root_env = os.path.join(os.path.dirname(__file__), '../../.env')
 
 if os.path.exists(project_root_env):
-    load_dotenv(project_root_env, override=True)
+    load_dotenv(project_root_env, override=False)
 else:
-    # If no .env in root, try to load environment variables (for production)
-    load_dotenv(override=True)
+    # No .env at the root: fall back to discovery from the working directory.
+    load_dotenv(override=False)
 
 
 class Config:
