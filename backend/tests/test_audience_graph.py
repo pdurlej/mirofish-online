@@ -1782,6 +1782,7 @@ def test_live_audience_runner_times_out_slow_personas_without_hanging():
             *,
             high_quality_retry=False,  # noqa: ARG002
             client_provider=None,  # noqa: ARG002
+            time_anchor=None,  # noqa: ARG002
         ):
             if persona.id == slow_persona_id:
                 time.sleep(0.3)
@@ -1918,3 +1919,89 @@ def test_live_only_memory_excludes_runs_the_panel_did_not_produce():
     assert len(unfiltered) == 2
     assert filtered == unfiltered - {fake.to_dict()["topic"]["title"]}
     assert len(filtered) == 1
+
+
+def test_time_anchor_is_locale_independent_and_first_in_the_prompt():
+    """The date must read as English regardless of the host's locale.
+
+    strftime("%B") follows LC_TIME, so a machine set to Polish would put
+    "sierpnia" into an otherwise English system prompt, and "%-d" is not
+    portable at all. Hence the explicit month table.
+    """
+    import locale as locale_module
+    from datetime import datetime, timezone
+
+    from app.audience.live_runner import format_time_anchor
+
+    moment = datetime(2026, 8, 18, 22, 5, tzinfo=timezone.utc)
+    assert format_time_anchor(moment) == "Today is 18 August 2026."
+
+    try:
+        locale_module.setlocale(locale_module.LC_TIME, "pl_PL.UTF-8")
+    except locale_module.Error:
+        pass  # Locale absent on this host; the assertion above already holds.
+    else:
+        try:
+            assert format_time_anchor(moment) == "Today is 18 August 2026."
+        finally:
+            locale_module.setlocale(locale_module.LC_TIME, "C")
+
+    persona = load_default_personas()[0]
+    run_input = AudienceRunInput(topic="Temat o specyfikacjach agentów", channel="podcast")
+    anchored = _persona_messages(
+        run_input, persona, time_anchor=format_time_anchor(moment)
+    )[0]["content"]
+    plain = _persona_messages(run_input, persona)[0]["content"]
+
+    # First thing the model reads, and the rest of the prompt survives intact.
+    assert anchored.startswith("Today is 18 August 2026. You are one synthetic")
+    assert "synthetic audience persona" in anchored
+    assert len(anchored) - len(plain) == len("Today is 18 August 2026. ")
+    assert not plain.startswith("Today is")
+
+
+def test_run_gives_every_persona_the_same_anchor_and_records_it():
+    """One anchor per run, not one per persona.
+
+    A twenty-persona run crossing midnight would otherwise hand different dates
+    to different personas and quietly contaminate the comparison the graph
+    exists to make.
+
+    Reads the system prompt the client actually receives rather than overriding
+    _call_persona. An earlier version of this test did override it, and a
+    deliberately planted per-persona anchor sailed straight through, because the
+    override meant the real prompt builder never ran.
+    """
+    prompts: list[str] = []
+
+    class PromptRecordingClient:
+        def chat_with_metadata(self, **kwargs):
+            system = next(
+                message["content"]
+                for message in kwargs["messages"]
+                if message["role"] == "system"
+                and "synthetic audience persona" in message["content"]
+            )
+            prompts.append(system)
+            return LLMChatResult(
+                content=VALID_REACTION_JSON,
+                model=kwargs["model"],
+                usage={"total_tokens": 10},
+                latency_ms=1,
+                finish_reason="stop",
+            )
+
+    personas = load_default_personas()[:4]
+    result = AudienceLiveRunner(
+        client_factory=PromptRecordingClient, max_workers=4
+    ).run(
+        AudienceRunInput(topic="Temat bie\u017c\u0105cy o agentach", channel="podcast"),
+        personas=personas,
+    )
+
+    anchors = [prompt.split(" You are one synthetic")[0] for prompt in prompts]
+
+    assert len(anchors) == 4
+    assert len(set(anchors)) == 1, "every persona in one run must share the anchor"
+    assert anchors[0].startswith("Today is ")
+    assert result.receipt["model_routing"]["time_anchor"] == anchors[0]
