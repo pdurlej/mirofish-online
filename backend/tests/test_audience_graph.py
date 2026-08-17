@@ -1888,3 +1888,33 @@ def test_recluster_cli_requires_explicit_version_confirmation_for_apply():
 
     assert result.returncode != 0
     assert "--confirm-version 2" in result.stderr
+
+
+def test_live_only_memory_excludes_runs_the_panel_did_not_produce():
+    """The filter has to change the answer, not just travel to the query.
+
+    Production carries 73 runs from a research import and a handful of fakes
+    alongside 114 real ones. Asserting that live_only reaches Cypher proves
+    plumbing; this proves the behaviour on mixed provenance.
+    """
+    store = InMemoryAudienceGraphStore()
+
+    fake = build_fake_audience_run(
+        AudienceRunInput(topic="Fixture topic about pricing", channel="blog")
+    )
+    store.write_run(fake)
+    assert fake.to_dict()["receipt"]["mode"] == "fake"
+
+    live = build_fake_audience_run(
+        AudienceRunInput(topic="Real topic about agent specs", channel="podcast")
+    )
+    live_payload = live.to_dict()
+    live_payload["receipt"]["mode"] = "live"
+    store._runs[live.run_id] = live_payload
+
+    unfiltered = {item["title"] for item in store.previous_topics()}
+    filtered = {item["title"] for item in store.previous_topics(live_only=True)}
+
+    assert len(unfiltered) == 2
+    assert filtered == unfiltered - {fake.to_dict()["topic"]["title"]}
+    assert len(filtered) == 1
