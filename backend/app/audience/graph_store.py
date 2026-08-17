@@ -10,6 +10,18 @@ from .audience_run import AudienceRunResult
 from .channel_fit import build_channel_scores, enrich_payload_channel_scores
 
 
+# The only provenance the panel may learn from. Written by AudienceLiveRunner;
+# fake runs carry "fake" and the 2026 research import carries
+# "synthetic_research_snapshot". Reviewer memory built from those quotes a
+# different system back at the panel as if it were its own history.
+LIVE_RUN_MODE = "live"
+
+
+def _is_live_payload(payload: dict[str, Any]) -> bool:
+    """Whether a stored run came from the live panel rather than a fixture."""
+    return (payload.get("receipt") or {}).get("mode") == LIVE_RUN_MODE
+
+
 class AudienceGraphStore(Protocol):
     def write_run(self, result: AudienceRunResult) -> dict[str, Any]:
         """Persist an audience run and return structured write counts."""
@@ -17,8 +29,17 @@ class AudienceGraphStore(Protocol):
     def read_run(self, run_id: str) -> dict[str, Any] | None:
         """Return a stored audience run summary."""
 
-    def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
-        """Return recent topics for similarity checks."""
+    def previous_topics(
+        self, limit: int = 25, *, live_only: bool = False
+    ) -> list[dict[str, Any]]:
+        """Return recent topics for similarity checks.
+
+        ``live_only`` restricts the result to runs this panel actually produced.
+        The live runner asks for it, because reviewer memory built from the 2026
+        research import quotes a different system back at the panel as its own
+        history. The snapshot generator deliberately does not: it feeds each
+        generated run the previous ones so the corpus gains internal structure.
+        """
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
         """Return recent audience runs for history UI."""
@@ -50,8 +71,13 @@ class InMemoryAudienceGraphStore:
         payload = self._runs.get(run_id)
         return _enrich_payload_for_read(payload) if payload else None
 
-    def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
-        values = _latest_unique_payloads(self._runs.values(), limit)
+    def previous_topics(
+        self, limit: int = 25, *, live_only: bool = False
+    ) -> list[dict[str, Any]]:
+        source = self._runs.values()
+        if live_only:
+            source = [p for p in source if _is_live_payload(p)]
+        values = _latest_unique_payloads(source, limit)
         return [_previous_topic_payload(payload) for payload in values]
 
     def list_runs(self, limit: int = 25) -> list[dict[str, Any]]:
@@ -356,12 +382,15 @@ class Neo4jAudienceGraphStore:
         with self._storage._driver.session() as session:  # noqa: SLF001
             return self._storage._call_with_retry(session.execute_read, _read)  # noqa: SLF001
 
-    def previous_topics(self, limit: int = 25) -> list[dict[str, Any]]:
+    def previous_topics(
+        self, limit: int = 25, *, live_only: bool = False
+    ) -> list[dict[str, Any]]:
         def _read(tx):
             result = tx.run(
                 """
                 MATCH (t:AudienceTopic)
                 OPTIONAL MATCH (r:AudienceRun)-[:TESTED_TOPIC]->(t)
+                WHERE NOT $live_only OR r.mode = $live_mode
                 WITH t, r
                 ORDER BY r.created_at DESC
                 WITH t, head(collect(r)) AS latest_run
@@ -370,6 +399,11 @@ class Neo4jAudienceGraphStore:
                 // cannot hang off a WHERE. Without this re-projection Neo4j
                 // rejects the whole statement with a syntax error, which made
                 // every live run fail before its first LLM call.
+                // MODE FILTER ABOVE: only runs this panel produced may feed its
+                // own memory. Production holds 194 runs, of which 73 came from a
+                // one-off Gemini import written by a script that never went
+                // through the runner, plus fake runs from the UI toggle.
+                // Reviewer memory quoting those is quoting a different system.
                 WITH t, latest_run
                 ORDER BY coalesce(t.updated_at, latest_run.created_at) DESC
                 LIMIT $limit
@@ -410,6 +444,8 @@ class Neo4jAudienceGraphStore:
                        objections AS objections
                 """,
                 limit=limit,
+                live_only=bool(live_only),
+                live_mode=LIVE_RUN_MODE,
             )
             return [_previous_topic_from_record(dict(record)) for record in result]
 

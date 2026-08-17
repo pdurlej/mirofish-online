@@ -223,7 +223,13 @@ class AudienceLiveRunner:
         started = time.monotonic()
         active_personas = personas or load_default_personas()
         run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"live:{run_input.topic_hash}:{run_input.run_seed}"))
-        created_at = datetime.now(timezone.utc).isoformat()
+        # One timestamp for the whole run. The date is also what the personas are
+        # told, so taking it per persona would hand a run that crosses midnight
+        # two different anchors and quietly contaminate the very comparisons the
+        # graph exists to make.
+        started_at = datetime.now(timezone.utc)
+        created_at = started_at.isoformat()
+        time_anchor = format_time_anchor(started_at)
 
         topic = {
             "id": f"topic-{run_input.topic_hash[:16]}",
@@ -246,6 +252,10 @@ class AudienceLiveRunner:
             "high_quality_retry_available": (
                 self._model_router.high_quality_retry_available
             ),
+            # Recorded because the prompt now changes every day. Without it the
+            # difference between two runs of one topic is no longer purely the
+            # model's, and nobody could tell which date the panel was given.
+            "time_anchor": time_anchor,
             "failure_threshold": self._failure_threshold,
             "max_workers": self._max_workers,
         }
@@ -264,6 +274,7 @@ class AudienceLiveRunner:
                     persona,
                     assignment.model,
                     run_client.get,
+                    time_anchor,
                 )
                 future_map[future] = (persona, assignment)
 
@@ -471,6 +482,7 @@ class AudienceLiveRunner:
         persona: AudiencePersona,
         model: str,
         client_provider: Callable[[], LLMClient] | None = None,
+        time_anchor: str | None = None,
     ) -> PersonaCallResult:
         try:
             call = self._call_persona(
@@ -478,6 +490,7 @@ class AudienceLiveRunner:
                 persona,
                 model,
                 client_provider=client_provider,
+                time_anchor=time_anchor,
             )
             return _ensure_success_attempts(call, high_quality_retry=False)
         except PersonaCallFailed as exc:
@@ -491,6 +504,7 @@ class AudienceLiveRunner:
                     retry_model,
                     high_quality_retry=True,
                     client_provider=client_provider,
+                    time_anchor=time_anchor,
                 )
                 retry_call = _ensure_success_attempts(retry_call, high_quality_retry=True)
                 return PersonaCallResult(
@@ -515,9 +529,10 @@ class AudienceLiveRunner:
         *,
         high_quality_retry: bool = False,
         client_provider: Callable[[], LLMClient] | None = None,
+        time_anchor: str | None = None,
     ) -> PersonaCallResult:
         client = client_provider() if client_provider else self._client_factory()
-        messages = _persona_messages(run_input, persona)
+        messages = _persona_messages(run_input, persona, time_anchor=time_anchor)
         response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -652,7 +667,28 @@ class AudienceLiveRunner:
         )
 
 
-def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
+_MONTHS_EN = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def format_time_anchor(moment: datetime) -> str:
+    """Render the run's date for the persona prompt, locale-independently.
+
+    strftime("%B") follows LC_TIME, so on a machine with a Polish locale it
+    would put "sierpnia" into an otherwise English prompt, and "%-d" is not
+    portable. An explicit month table avoids both.
+    """
+    return f"Today is {moment.day} {_MONTHS_EN[moment.month - 1]} {moment.year}."
+
+
+def _persona_messages(
+    run_input: AudienceRunInput,
+    persona: AudiencePersona,
+    *,
+    time_anchor: str | None = None,
+) -> list[dict[str, str]]:
     stance_values = ", ".join(
         f'"{value}"' for value in REACTION_SCHEMA["properties"]["stance"]["enum"]
     )
@@ -675,10 +711,19 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
         "Write free-text values in the same language as the submitted topic. "
         "Keys and the two enumerated values above are always English."
     )
+    # Goes first in the system prompt. Without it the model falls back to its
+    # training cutoff and treats the present as a forecast: two of twenty
+    # personas rejected a live topic as "a vision for 2026, pure speculation"
+    # when that was the current month. Measured across three wordings, the bare
+    # date zeroed those rejections with no side effect, while heavier framings
+    # ("this is your present, not a forecast") only flipped the axis and began
+    # dismissing the same topic as already outdated.
+    anchor_prefix = f"{time_anchor} " if time_anchor else ""
     return [
         {
             "role": "system",
             "content": (
+                f"{anchor_prefix}"
                 "You are one synthetic audience persona in a private content and "
                 "product thinking panel. Answer as this persona only.\n"
                 "You are reacting, not reviewing. Do not describe or summarise the "
@@ -960,6 +1005,7 @@ def _empty_live_receipt() -> dict[str, Any]:
             "model_pool": [],
             "high_quality_retry_model": None,
             "high_quality_retry_available": False,
+            "time_anchor": None,
             "failure_threshold": None,
             "max_workers": None,
         },

@@ -107,7 +107,10 @@ class AudienceRunManager:
             try:
                 result = self._runner_factory().run(
                     item.run_input,
-                    previous_topics=item.store.previous_topics(),
+                    # The one live path, and the only caller that must not see
+                    # imported or fake history: reviewer memory here is quoted
+                    # back to the personas as their own past reactions.
+                    previous_topics=item.store.previous_topics(live_only=True),
                 )
                 counts = item.store.write_run(result)
                 with self._lock:
