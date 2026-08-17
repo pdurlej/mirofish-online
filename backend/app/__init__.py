@@ -20,6 +20,7 @@ from .lifecycle import (  # noqa: E402
     register_default_work_providers,
     register_lifecycle,
 )
+from .utils.error_contract import register_error_handlers  # noqa: E402
 from .utils.logger import get_logger, setup_logger  # noqa: E402
 
 
@@ -55,6 +56,9 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Read once: several blocks below depend on it and a test subclass may set it.
+    simulation_enabled = bool(app.config.get('MIROFISH_ENABLE_SIMULATION', False))
+
     # Configure JSON encoding: ensure Chinese displays directly (not as \uXXXX)
     # Flask >= 2.3 uses app.json.ensure_ascii, older versions use JSON_AS_ASCII config
     if hasattr(app, 'json') and hasattr(app.json, 'ensure_ascii'):
@@ -72,6 +76,18 @@ def create_app(config_class=Config):
         logger.info("=" * 50)
         logger.info("MiroFish-Offline Backend starting...")
         logger.info("=" * 50)
+
+    # Config.validate was only ever called from run.py, the development entry
+    # point. Production starts with `gunicorn app:create_app()`, so a missing
+    # LLM_API_KEY first showed up as failing personas inside a paid run.
+    #
+    # Logged rather than raised, on purpose. Raising would break CI, which runs
+    # the suite without provider credentials, and it would buy little: readiness
+    # already fails closed and the lifecycle script gates the start on it. What
+    # was missing was not a crash but a message, and this is the first thing in
+    # the startup log.
+    for problem in config_class.validate():
+        logger.error("Configuration problem: %s", problem)
 
     # Enable CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -97,11 +113,13 @@ def create_app(config_class=Config):
     register_default_work_providers(lifecycle)
     register_lifecycle(app, lifecycle)
 
-    # Register simulation process cleanup function (ensure all simulation processes terminate on server shutdown)
-    from .services.simulation_runner import SimulationRunner
-    SimulationRunner.register_cleanup()
-    if should_log_startup:
-        logger.info("Simulation process cleanup function registered")
+    # Reap simulation subprocesses on shutdown. Pointless when the lane cannot be
+    # reached, since nothing will have started one.
+    if simulation_enabled:
+        from .services.simulation_runner import SimulationRunner
+        SimulationRunner.register_cleanup()
+        if should_log_startup:
+            logger.info("Simulation process cleanup function registered")
 
     # Request logging middleware
     @app.before_request
@@ -127,13 +145,29 @@ def create_app(config_class=Config):
         logger.debug(f"Response: {response.status_code}")
         return response
 
-    # Register blueprints
+    # Register blueprints. The audience lane is the product; the document-graph
+    # and simulation lanes are the inherited fork, off unless asked for.
+    #
+    # Only registration is conditional, not the import. Making the import
+    # conditional too was measured and rejected: with camel out of the default
+    # install, importing api.simulation costs about 14 ms and pulls in nothing
+    # heavy, so the complexity bought nothing.
     from .api import audience_bp, graph_bp, report_bp, simulation_bp
-    app.register_blueprint(graph_bp, url_prefix='/api/graph')
-    app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
-    app.register_blueprint(report_bp, url_prefix='/api/report')
     app.register_blueprint(audience_bp, url_prefix='/api/audience')
+    if simulation_enabled:
+        app.register_blueprint(graph_bp, url_prefix='/api/graph')
+        app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
+        app.register_blueprint(report_bp, url_prefix='/api/report')
+    elif should_log_startup:
+        logger.info(
+            "Simulation lane disabled; set MIROFISH_ENABLE_SIMULATION=true to register it"
+        )
     register_frontend_routes(app)
+
+    # After the blueprints, so routes that handle their own exceptions keep
+    # doing so; this only shapes what escapes them, which was Werkzeug's HTML
+    # page. See app/utils/error_contract.py.
+    register_error_handlers(app)
 
     if should_log_startup:
         logger.info("MiroFish-Offline Backend startup complete")

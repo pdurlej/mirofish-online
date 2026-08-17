@@ -937,6 +937,11 @@ def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "max_duplicate_objections": receipt.get("max_duplicate_objections", 0),
         "near_duplicate_objections": receipt.get("near_duplicate_objections", 0),
         "weak_topic_grounding": receipt.get("weak_topic_grounding", 0),
+        "loose_normalization_count": receipt.get("loose_normalization_count", 0),
+        "unrecognized_stance_count": receipt.get("unrecognized_stance_count", 0),
+        "unrecognized_severity_count": receipt.get("unrecognized_severity_count", 0),
+        "stance_distribution": receipt.get("stance_distribution", {}),
+        "severity_distribution": receipt.get("severity_distribution", {}),
     }
 
 

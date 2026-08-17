@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Optional
 from enum import Enum
 from dataclasses import dataclass, field
 from ..config import Config
+from ..utils.resource_ids import safe_child_path
 
 
 class ProjectStatus(str, Enum):
@@ -111,8 +112,14 @@ class ProjectManager:
 
     @classmethod
     def _get_project_dir(cls, project_id: str) -> str:
-        """Get project directory path"""
-        return os.path.join(cls.PROJECTS_DIR, project_id)
+        """Get project directory path.
+
+        The single choke point for project paths, so validating here covers the
+        metadata, files and text helpers below as well as delete_project. See
+        app/utils/resource_ids.py for why: `DELETE /api/graph/project/%2e%2e`
+        resolved to the uploads root and rmtree'd it.
+        """
+        return safe_child_path(cls.PROJECTS_DIR, project_id, kind="project_id")
 
     @classmethod
     def _get_project_meta_path(cls, project_id: str) -> str:

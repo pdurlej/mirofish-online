@@ -22,10 +22,6 @@ dependencies = [
     # Neo4j graph database driver
     "neo4j>=5.15.0",
     
-    # OASIS 社交媒体模拟
-    "camel-oasis==0.2.5",
-    "camel-ai==0.2.78",
-    
     # 文件处理
     "PyMuPDF>=1.24.0",
     # 编码检测（支持非UTF-8编码的文本文件）
@@ -38,6 +34,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The OASIS/CAMEL social simulation lane. Nothing under backend/app imports
+# these: the only real imports live inside functions in
+# backend/scripts/run_*_simulation.py, which SimulationRunner launches as
+# subprocesses. Keeping them out of the default set is what removes torch and
+# the 15 nvidia-*-cu12 wheels from the production image, which the Dockerfile
+# builds with `uv sync --frozen --no-dev` and therefore without extras.
+#
+# To run simulations: uv sync --extra simulator
+simulator = [
+    "camel-oasis==0.2.5",
+    "camel-ai==0.2.78",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

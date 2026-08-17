@@ -70,13 +70,38 @@ class Neo4jStorage(GraphStorage):
             return False
 
     def _ensure_schema(self):
-        """Create indexes and constraints if they don't exist."""
-        with self._driver.session() as session:
+        """Create indexes and constraints if they don't exist.
+
+        Every statement is IF NOT EXISTS, so "may already exist" was never a real
+        explanation. Swallowing everything at warning level meant a schema that
+        was never created looked exactly like a healthy one -- production logs
+        show dozens of these while Neo4j was simply unreachable.
+
+        Unreachable stays a warning, because the app must still start and report
+        itself unready. Anything else is a real defect (bad Cypher, a rejected
+        index option, existing data that violates a new uniqueness constraint)
+        and is logged as an error naming the failing statement.
+        """
+        self.schema_errors: List[str] = []
+        try:
+            session_context = self._driver.session()
+        except Exception as exc:  # noqa: BLE001 - startup must not hard-fail
+            logger.warning("Schema setup skipped, Neo4j unreachable: %s", exc)
+            self.schema_errors.append("session_unavailable")
+            return
+
+        with session_context as session:
             for query in neo4j_schema.ALL_SCHEMA_QUERIES:
+                statement = " ".join(query.split())[:80]
                 try:
                     session.run(query)
-                except Exception as e:
-                    logger.warning(f"Schema query warning (may already exist): {e}")
+                except (ServiceUnavailable, SessionExpired, TransientError) as exc:
+                    logger.warning("Schema setup incomplete, Neo4j unreachable: %s", exc)
+                    self.schema_errors.append("unreachable")
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Schema statement failed [%s]: %s", statement, exc)
+                    self.schema_errors.append(statement)
 
     # ----------------------------------------------------------------
     # Retry wrapper

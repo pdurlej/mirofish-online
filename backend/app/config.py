@@ -7,15 +7,20 @@ import os
 
 from dotenv import load_dotenv
 
-# Load .env file from project root
-# Path: MiroFish/.env (relative to backend/app/config.py)
+# Load .env from the project root: MiroFish/.env, relative to this file.
+#
+# override=False so a real environment variable wins over the file. The previous
+# override=True inverted that: values injected by docker-compose `environment:`
+# or by the shell were silently replaced by whatever a stray .env happened to
+# contain. The production image never copies .env, so this changes nothing there
+# -- it removes a way to be surprised locally.
 project_root_env = os.path.join(os.path.dirname(__file__), '../../.env')
 
 if os.path.exists(project_root_env):
-    load_dotenv(project_root_env, override=True)
+    load_dotenv(project_root_env, override=False)
 else:
-    # If no .env in root, try to load environment variables (for production)
-    load_dotenv(override=True)
+    # No .env at the root: fall back to discovery from the working directory.
+    load_dotenv(override=False)
 
 
 class Config:
@@ -28,6 +33,14 @@ class Config:
     DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     MIROFISH_START_DRAINED = (
         os.environ.get('MIROFISH_START_DRAINED', 'false').lower() == 'true'
+    )
+    # Registers /api/graph, /api/simulation and /api/report. Off by default: the
+    # lane handled one Entity node and five Episodes in production before being
+    # abandoned, and it is the larger half of the API surface with no test
+    # covering its routes. Enabling it also needs `uv sync --extra simulator`,
+    # since camel-oasis is no longer part of the default install.
+    MIROFISH_ENABLE_SIMULATION = (
+        os.environ.get('MIROFISH_ENABLE_SIMULATION', 'false').lower() == 'true'
     )
 
     # JSON configuration - disable ASCII escaping to display Chinese directly (not as \uXXXX)
@@ -56,6 +69,12 @@ class Config:
     MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS = int(
         os.environ.get('MIROFISH_AUDIENCE_MAX_TERMINAL_RECORDS', '64')
     )
+    # Audience storage selection. 'auto' uses Neo4j when it initialized, and the
+    # in-process store otherwise. 'memory' demands the in-process store, so tests
+    # and offline runs no longer depend on a Neo4j failure to get one.
+    MIROFISH_AUDIENCE_STORE = os.environ.get(
+        'MIROFISH_AUDIENCE_STORE', 'auto'
+    ).strip().lower()
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')

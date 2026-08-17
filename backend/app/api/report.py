@@ -13,6 +13,7 @@ from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
 from ..services.graph_tools import GraphToolsService
+from ..utils.resource_ids import UnsafeResourceId
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.api.report')
@@ -212,6 +213,11 @@ def delete_report(report_id: str):
         if not success:
             return jsonify({"success": False, "error": f"Report does not exist: {report_id}"}), 404
         return jsonify({"success": True, "message": f"Report deleted: {report_id}"})
+    except UnsafeResourceId:
+        # Let the app-level handler answer this as a 400. Caught here otherwise,
+        # a malformed identifier would be reported as a server fault -- and this
+        # is the route where `%2e%2e` used to delete the whole uploads tree.
+        raise
     except Exception as e:
         logger.exception(f"Failed to delete report: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
