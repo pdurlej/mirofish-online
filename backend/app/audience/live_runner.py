@@ -180,8 +180,16 @@ RETRYABLE_PERSONA_ERRORS = {
     "invalid_json",
     "schema_validation_failed",
     "low_quality_response",
+    "truncated_response",
 }
-PERSONA_JSON_MAX_TOKENS = 900
+# This budget covers reasoning tokens, not just the answer. Measured on
+# gemma4:31b: a 533-character JSON reply consumed 790 completion tokens, so
+# roughly 600 went to reasoning that never reaches the content. At 900 the
+# answer was being cut mid-key (finish_reason="length"), which the code then
+# reported as invalid_json and rescued with a second call -- 38 calls for 20
+# personas. Headroom is cheaper than a retry: unused tokens cost nothing, a
+# truncated answer costs a whole extra request.
+PERSONA_JSON_MAX_TOKENS = 2500
 
 
 class AudienceLiveRunner:
@@ -521,6 +529,7 @@ class AudienceLiveRunner:
                 reasoning_effort=_reasoning_effort_for_model(model),
             )
             try:
+                _reject_if_truncated(result)
                 parsed = _parse_and_validate(
                     result.content, normalization=strict_normalization
                 )
@@ -598,6 +607,7 @@ class AudienceLiveRunner:
         # that was thrown away, so reusing it would report stale coercions.
         repair_normalization: dict[str, bool] = {}
         try:
+            _reject_if_truncated(result)
             parsed = _parse_and_validate(
                 result.content, normalization=repair_normalization
             )
@@ -635,24 +645,45 @@ class AudienceLiveRunner:
 
 
 def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> list[dict[str, str]]:
+    stance_values = ", ".join(
+        f'"{value}"' for value in REACTION_SCHEMA["properties"]["stance"]["enum"]
+    )
+    severity_values = ", ".join(
+        f'"{value}"'
+        for value in REACTION_SCHEMA["properties"]["objection_severity"]["enum"]
+    )
     contract = (
         'Return exactly one JSON object with these keys: "stance", "channel_fit", '
         '"channel_scores", "summary", "objection", "objection_severity", "insight", '
         '"decision_impact". "channel_scores" must contain integer 0-100 scores for '
         '"linkedin", "podcast", "blog", "twitter-x", and "product-idea". '
+        f'"stance" must be exactly one of {stance_values}. '
+        f'"objection_severity" must be exactly one of {severity_values}. '
         'The first character must be "{" and the last character must be "}". '
         "Use double quotes, no markdown, no prose, no arrays, no comments. "
-        "If the submitted topic is Polish, write JSON string values in Polish."
+        # The old instruction said to write JSON string values in Polish for
+        # Polish topics, which the model applied to the enums too. Every Polish
+        # stance then failed validation and was silently rewritten.
+        "Write free-text values in the same language as the submitted topic. "
+        "Keys and the two enumerated values above are always English."
     )
     return [
         {
             "role": "system",
             "content": (
-                "You are one synthetic audience persona in Piotr Durlej's private "
-                "content/product thinking panel. Answer as this persona only. "
-                "Be concrete, skeptical when appropriate, and return only JSON. "
-                "Keep every JSON string to one short sentence. Objections and insights "
-                "must mention a concrete part of the submitted topic, not generic advice. "
+                "You are one synthetic audience persona in a private content and "
+                "product thinking panel. Answer as this persona only.\n"
+                "You are reacting, not reviewing. Do not describe or summarise the "
+                'topic. Never open a value with "Analysis of", "A text about", '
+                '"An overview of" or any equivalent. State what you think and why '
+                "it matters to you specifically.\n"
+                "Take a position. Pick the stance that matches your actual leaning, "
+                'and use "curious" only when you genuinely have none — an evasive '
+                "middle answer is worse than a wrong one, because the panel exists "
+                "to disagree.\n"
+                "Be concrete and return only JSON. Keep every JSON string to one "
+                "short sentence. Objections and insights must name a concrete part "
+                "of the submitted topic, not generic advice.\n"
                 f"{contract}"
             ),
         },
@@ -667,6 +698,9 @@ def _persona_messages(run_input: AudienceRunInput, persona: AudiencePersona) -> 
                 f"Skepticism: {persona.skepticism}\n\n"
                 f"Title: {run_input.display_title}\n"
                 f"Topic/draft:\n{run_input.topic}\n\n"
+                '"summary" is your reaction to this, in your own voice: what you '
+                "make of it and whether it earns your attention. It is not a "
+                "description of what the topic is about.\n"
                 "Score every channel independently before comparing them. Judge whether "
                 "this should become a podcast, LinkedIn post, blog, Twitter/X post, product "
                 "idea, or be narrowed/rewritten.\n\n"
@@ -708,6 +742,17 @@ def _parse_and_validate(
             path, message = error
             raise ValueError(f"schema_error:{path}:{message}")
     return parsed
+
+
+def _reject_if_truncated(result: LLMChatResult) -> None:
+    """Name a cut-off answer for what it is.
+
+    A response that hit the token ceiling is a budget problem. Reported as
+    invalid_json it looks like a badly behaved model instead, which is how a
+    900-token cap masqueraded as model unreliability for months.
+    """
+    if result.finish_reason == "length":
+        raise ValueError("truncated_response")
 
 
 def _record_normalization(normalization: dict[str, bool], parsed: Any) -> None:
@@ -920,6 +965,8 @@ def _empty_live_receipt() -> dict[str, Any]:
         "loose_normalization_count": 0,
         "unrecognized_stance_count": 0,
         "unrecognized_severity_count": 0,
+        # Why calls were wasted, keyed by sanitized error kind.
+        "error_kinds": {},
         # Whether the panel actually disagreed with itself. A run where every
         # persona lands on the same stance carries no signal, however clean it
         # looks by every other measure.
@@ -935,6 +982,11 @@ def _empty_live_receipt() -> dict[str, Any]:
 
 def _record_attempts(receipt: dict[str, Any], attempts: tuple[PersonaAttempt, ...] | list[PersonaAttempt]) -> None:
     for attempt in attempts:
+        if attempt.error_kind:
+            # Which failure, not just how many. Without this the receipt could
+            # say a third of the calls were wasted but not why.
+            kinds = receipt.setdefault("error_kinds", {})
+            kinds[attempt.error_kind] = kinds.get(attempt.error_kind, 0) + 1
         if attempt.schema_fallback:
             receipt["schema_fallback_attempt_count"] += 1
             receipt["persona_repair_retry_count"] += 1
@@ -1517,6 +1569,7 @@ def _looks_like_schema_retry(exc: Exception) -> bool:
         or "invalid_json" in text
         or "schema_error" in text
         or "schema_validation_failed" in text
+        or "truncated_response" in text
     )
 
 
@@ -1525,6 +1578,8 @@ def _sanitized_error_kind(exc: Exception) -> str:
         return "invalid_json"
     if isinstance(exc, ValueError) and str(exc).startswith("schema_error"):
         return "schema_validation_failed"
+    if isinstance(exc, ValueError) and str(exc) == "truncated_response":
+        return "truncated_response"
     if isinstance(exc, ValueError) and str(exc) == "invalid_json":
         return "invalid_json"
     if isinstance(exc, ValueError) and str(exc) == "low_quality_response":

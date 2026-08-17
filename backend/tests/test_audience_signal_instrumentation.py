@@ -123,6 +123,44 @@ def test_value_distribution_orders_by_frequency():
     assert _value_distribution([]) == {}
 
 
+class _TruncatingClient:
+    """Returns a cut-off answer, the way a model does when it runs out of budget."""
+
+    def chat_with_metadata(self, **kwargs):
+        return LLMChatResult(
+            content='{"stance": "skeptical", "objec',
+            model=kwargs["model"],
+            usage={"prompt_tokens": 10, "completion_tokens": 900, "total_tokens": 910},
+            latency_ms=1,
+            finish_reason="length",
+        )
+
+
+def test_truncated_answer_is_named_truncation_not_bad_json():
+    """A cut-off answer is a budget problem and has to say so.
+
+    Measured on gemma4:31b: a 533-character JSON reply burned 790 completion
+    tokens because most of the budget went to reasoning that never reaches the
+    content. Against the old 900 cap the answer was cut mid-key, reported as
+    invalid_json, and rescued by a second call -- 38 calls for 20 personas.
+    """
+    runner = AudienceLiveRunner(client_factory=_TruncatingClient, failure_threshold=1.0)
+    result = runner.run(AudienceRunInput(topic="Truncation probe", run_seed="cut"))
+    receipt = result.to_dict()["receipt"]
+
+    assert receipt["failed_persona_count"] == 20
+    # Named correctly, and specifically not blamed on the model's JSON.
+    assert receipt["error_kinds"].get("truncated_response")
+    assert "invalid_json" not in receipt["error_kinds"]
+
+
+def test_token_budget_leaves_room_for_reasoning():
+    from app.audience.live_runner import PERSONA_JSON_MAX_TOKENS
+
+    # Observed completions on the real model reached 928 tokens with reasoning.
+    assert PERSONA_JSON_MAX_TOKENS >= 2000
+
+
 class _ScriptedClient:
     """Answers every persona with the same fixed reaction body."""
 
